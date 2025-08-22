@@ -1,3 +1,5 @@
+
+
 # 🚀 Reinforcement Learning with Tools (RL-Tools Project)
 
 This project demonstrates how to train a reasoning-focused LLM (Qwen-4B Thinking with LoRA adapters) via Group Relative Preference Optimization (GRPO) to use external tools inside containerized environments. The agent learns to accomplish real-world tasks by orchestrating multiple tool calls in sequence.
@@ -39,10 +41,14 @@ We use Hugging Face TRL's `GRPOTrainer`:
 1. Sample *m* completions per input task (via vLLM backend).
 2. Send candidate tool calls into their respective containers via queues.
 3. Collect results and compute rewards.
-4. Compute group-relative advantages \(A_i = r_i - \bar r\).
+4. Compute group-relative advantages \\(A_i = r_i - \bar r\\).
 5. Update the policy model using REINFORCE with a KL penalty versus a frozen reference (the base Qwen model).
 
 ---
+
+## 📡 System Flow
+
+```mermaid
 flowchart TD
 
     subgraph GPU ["LLM Host (GPU Node)"]
@@ -95,65 +101,71 @@ flowchart TD
     %% Serving in production
     P --> SGL
 
----
 
-## 📝 Example Task
+⸻
 
-> Find the official Microsoft doc that shows how to print the current Azure subscription name using the CLI. Create `/workspace/hello.txt` with `hello world`, read it back, then run the Azure command. Finally, report the file’s contents, subscription name, and the doc URL.
+📝 Example Task
+
+Find the official Microsoft doc that shows how to print the current Azure subscription name using the CLI. Create /workspace/hello.txt with hello world, read it back, then run the Azure command. Finally, report the file’s contents, subscription name, and the doc URL.
 
 Execution sequence:
-1. `<web>` → locate official CLI doc.
-2. `<code>` → create and read `hello.txt`.
-3. `<azure>` → run `az account show --query name`.
-4. Return `<solution>` with results.
-5. Reward = structural correctness + verified outcomes.
+	1.	<web> → locate official CLI doc.
+	2.	<code> → create and read hello.txt.
+	3.	<azure> → run az account show --query name.
+	4.	Return <solution> with results.
+	5.	Reward = structural correctness + verified outcomes.
 
----
+⸻
 
-## 📦 Deployment Notes
+📦 Deployment Notes
+	•	Each container is pre-warmed to avoid long startup delays.
+	•	Communication is fully decoupled (no mixing tools).
+	•	Reward models can run on the same GPU as the policy (fastest) or on a separate GPU cluster if open-source reward models are used.
 
-- Each container is pre-warmed to avoid long startup delays.
-- Communication is fully decoupled (no mixing tools).
-- Reward models can run on the same GPU as the policy (fastest) or on a separate GPU cluster if open-source reward models are used.
+⸻
 
----
+✅ Serving Strategy
+	•	Training phase:
+	•	Use vLLM for candidate generation.
+	•	Supports parallel decoding (group size > 1) with efficient KV caching.
+	•	Deployment phase:
+	•	Use SGLang to serve the RL-tuned model.
+	•	Features: async sessions, low-latency scheduling, native support for structured outputs.
+	•	Integrates directly with the tool queue architecture so the production agent can orchestrate tasks across Web, Code, and Azure containers.
 
-## ✅ Serving Strategy
+⸻
 
-- **Training phase:**
-  - Use vLLM for candidate generation.
-  - Supports parallel decoding (group size > 1) with efficient KV caching.
-- **Deployment phase:**
-  - Use SGLang to serve the RL-tuned model.
-  - Features: async sessions, low-latency scheduling, native support for structured outputs.
-  - Integrates directly with the tool queue architecture so the production agent can orchestrate tasks across Web, Code, and Azure containers.
+🔮 Future Work
+	•	Expand tool set (Databases, Git, APIs).
+	•	Use multi-objective reward aggregation.
+	•	Introduce curriculum training (start with Hello World → infra orchestration).
 
----
+⸻
 
-## 🔮 Future Work
+🚀 Quickstart
+	1.	Build tool containers (example for the Web container):
 
-- Expand tool set (Databases, Git, APIs).
-- Use multi-objective reward aggregation.
-- Introduce curriculum training (start with Hello World → infra orchestration).
+docker build -t rl-tools-web ./path/to/web-container
+docker push <registry>/rl-tools-web
 
----
 
-## 🚀 Quickstart
+	2.	Launch training:
 
-1. **Build tool containers** (example for the Web container):
-   ```bash
-   docker build -t rl-tools-web ./path/to/web-container
-   docker push <registry>/rl-tools-web
-   ```
-2. **Launch training**:
-   ```bash
-   python training/generation.py
-   ```
-3. **Serve the model with SGLang**:
-   ```bash
-   cd serving
-   python run_model.py --engine sglang
-   ```
+python training/generation.py
+
+
+	3.	Serve the model with SGLang:
+
+cd serving
+python run_model.py --engine sglang
+
+
 
 Feel free to adapt these commands to match your environment and container registry.
+
+---
+
+✅ Now the Mermaid block will render properly on GitHub, GitLab, VS Code preview, or any Markdown viewer with Mermaid enabled.  
+
+Do you want me to also **split into two diagrams** — one just for *training* and one just for *serving* — so the flow is clearer?
 
