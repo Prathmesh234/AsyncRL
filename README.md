@@ -44,65 +44,7 @@ We use Hugging Face TRL's `GRPOTrainer`:
 4. Compute group-relative advantages \\(A_i = r_i - \bar r\\).
 5. Update the policy model using REINFORCE with a KL penalty versus a frozen reference (the base Qwen model).
 
----
 
-## 📡 System Flow
-
-```mermaid
-flowchart TD
-
-    subgraph GPU ["LLM Host (GPU Node)"]
-        P[Qwen 4B Thinking + LoRA\nPolicy Model]
-        R[Reference Model (frozen)]
-        VLLM[vLLM Engine\n(parallel generation)]
-        GRPO[GRPO Trainer]
-    end
-
-    subgraph Queues ["Azure Storage Queues"]
-        Wsend[taskqueue-web]
-        Wrecv[rewardqueueweb]
-        Csend[taskqueue-code]
-        Crecv[rewardqueuecode]
-        Asend[taskqueue-azure]
-        Arecv[rewardqueueazure]
-    end
-
-    subgraph Containers ["Tool Containers"]
-        WebC[Web Container\n(Headless Browser)]
-        CodeC[Code Container\n(/workspace executor)]
-        AzureC[Azure CLI Container]
-    end
-
-    subgraph Serving ["Final Deployment"]
-        SGL[SGLang Serving Engine\n(async tool sessions)]
-    end
-
-    %% Model training + sampling
-    P -- generations --> VLLM
-    VLLM --> GRPO
-    GRPO --> P
-    R -. KL baseline .- GRPO
-
-    %% Tool calls routing
-    P -- tool call --> Wsend
-    P -- tool call --> Csend
-    P -- tool call --> Asend
-
-    %% Containers execute + return
-    Wsend --> WebC --> Wrecv
-    Csend --> CodeC --> Crecv
-    Asend --> AzureC --> Arecv
-
-    %% Rewards back into GRPO
-    Wrecv --> GRPO
-    Crecv --> GRPO
-    Arecv --> GRPO
-
-    %% Serving in production
-    P --> SGL
-```
-
-⸻
 
 📝 Example Task
 
