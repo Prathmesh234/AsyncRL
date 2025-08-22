@@ -48,6 +48,7 @@ We use Hugging Face TRL's `GRPOTrainer`:
 
 ```mermaid
 flowchart TD
+
     subgraph GPU ["LLM Host (GPU Node)"]
         P[Qwen 4B Thinking + LoRA<br>Policy Model]
         R[Reference Model (frozen)]
@@ -56,6 +57,16 @@ flowchart TD
     end
 
     subgraph Queues ["Azure Storage Queues"]
+=======
+    subgraph GPU[LLM Host (GPU Node)]
+        P[Qwen 4B Thinking + LoRA\nPolicy Model]
+        R[Reference Model (frozen)]
+        VLLM[vLLM Engine\n(parallel generation)]
+        GRPO[GRPO Trainer]
+    end
+
+    subgraph Queues[Azure Storage Queues]
+
         Wsend[taskqueue-web]
         Wrecv[rewardqueueweb]
         Csend[taskqueue-code]
@@ -79,6 +90,13 @@ flowchart TD
     P --|tool call|--> Csend
     P --|tool call|--> Asend
 
+    subgraph Containers[Tool Containers]
+        WebC[Web Container\n(Headless Browser)]
+        CodeC[Code Container\n(/workspace executor)]
+        AzureC[Azure CLI Container]
+    end
+
+
     Wsend --> WebC --> Wrecv
     Csend --> CodeC --> Crecv
     Asend --> AzureC --> Arecv
@@ -89,6 +107,9 @@ flowchart TD
 
     subgraph Serving ["Final Deployment"]
         SGL[SGLang Serving Engine<br>(async tool sessions)]
+=======
+    subgraph Serving[Final Deployment]
+        SGL[SGLang Serving Engine\n(async tool sessions)]
     end
 
     P --> SGL
