@@ -70,14 +70,6 @@ flowchart TD
         AzureC[Azure CLI Container]
     end
 
-    P -- generations --> VLLM
-    VLLM --> GRPO
-    GRPO --> P
-    R -. KL baseline .- GRPO
-
-    P -- tool call --> Wsend
-    P -- tool call --> Csend
-    P -- tool call --> Asend
 
     Wsend --> WebC --> Wrecv
     Csend --> CodeC --> Crecv
