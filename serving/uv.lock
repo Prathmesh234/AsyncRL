@@ -167,6 +167,34 @@ wheels = [
 ]
 
 [[package]]
+name = "azure-core"
+version = "1.35.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+    { name = "six" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ce/89/f53968635b1b2e53e4aad2dd641488929fef4ca9dfb0b97927fa7697ddf3/azure_core-1.35.0.tar.gz", hash = "sha256:c0be528489485e9ede59b6971eb63c1eaacf83ef53001bfe3904e475e972be5c", size = 339689, upload-time = "2025-07-03T00:55:23.496Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d4/78/bf94897361fdd650850f0f2e405b2293e2f12808239046232bdedf554301/azure_core-1.35.0-py3-none-any.whl", hash = "sha256:8db78c72868a58f3de8991eb4d22c4d368fae226dac1002998d6c50437e7dad1", size = 210708, upload-time = "2025-07-03T00:55:25.238Z" },
+]
+
+[[package]]
+name = "azure-servicebus"
+version = "7.14.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "azure-core" },
+    { name = "isodate" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b3/b5/82bbdd24c6221519a10c10cae931e67dc97f8db3c9bf2318c6dbe27ac282/azure_servicebus-7.14.2.tar.gz", hash = "sha256:4014b7ac882e0d9ff876a3302818607e1a640b93e9d482073d639f5b04266e5c", size = 523514, upload-time = "2025-04-09T22:15:37.454Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fc/9e/37a27b8e575f88a7463e82d777651ebd8bedb77970f170819b1b3d176f96/azure_servicebus-7.14.2-py3-none-any.whl", hash = "sha256:154bdde487ae3bd581fd49d207da4892091d9b61ab95f4cd4deab6dd4bb4649a", size = 411426, upload-time = "2025-04-09T22:15:39.537Z" },
+]
+
+[[package]]
 name = "blake3"
 version = "1.0.5"
 source = { registry = "https://pypi.org/simple" }
@@ -978,6 +1006,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/dc/9d/8b6dde58a028a3962ce17e84d5fe73758df61378e00ef8ac3d85da34b0ff/interegular-0.3.3.tar.gz", hash = "sha256:d9b697b21b34884711399ba0f0376914b81899ce670032486d0d048344a76600", size = 24705, upload-time = "2024-01-06T23:01:22.372Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c4/01/72d6472f80651673716d1deda2a5bbb633e563ecf94f4479da5519d69d25/interegular-0.3.3-py37-none-any.whl", hash = "sha256:b0c07007d48c89d6d19f7204972d369b2a77222722e126b6aa63aa721dc3b19c", size = 23635, upload-time = "2024-01-06T23:01:20.829Z" },
+]
+
+[[package]]
+name = "isodate"
+version = "0.7.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/54/4d/e940025e2ce31a8ce1202635910747e5a87cc3a6a6bb2d00973375014749/isodate-0.7.2.tar.gz", hash = "sha256:4cd1aa0f43ca76f4a6c6c0292a85f40b35ec2e43e315b59f06e6d32171a953e6", size = 29705, upload-time = "2024-10-08T23:04:11.5Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/15/aa/0aca39a37d3c7eb941ba736ede56d689e7be91cab5d9ca846bde3999eba6/isodate-0.7.2-py3-none-any.whl", hash = "sha256:28009937d8031054830160fce6d409ed342816b543597cece116d966c6d99e15", size = 22320, upload-time = "2024-10-08T23:04:09.501Z" },
 ]
 
 [[package]]
@@ -3292,15 +3329,19 @@ name = "serve-model"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "azure-servicebus" },
     { name = "flashinfer-python" },
     { name = "openai" },
+    { name = "python-dotenv" },
     { name = "vllm" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "azure-servicebus", specifier = ">=7.12.0" },
     { name = "flashinfer-python", specifier = ">=0.2.11.post3" },
     { name = "openai", specifier = ">=1.90.0" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "vllm", specifier = ">=0.10.0" },
 ]
 
