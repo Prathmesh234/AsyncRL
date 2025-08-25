@@ -82,32 +82,4 @@ Execution sequence:
 	•	Use multi-objective reward aggregation.
 	•	Introduce curriculum training (start with Hello World → infra orchestration).
 
-⸻
-
-🚀 Quickstart
-	1.	Build tool containers (example for the Web container):
-
-docker build -t rl-tools-web ./path/to/web-container
-docker push <registry>/rl-tools-web
-
-
-	2.	Launch training:
-
-python training/generation.py
-
-
-	3.	Serve the model with SGLang:
-
-cd serving
-python run_model.py --engine sglang
-
-
-
-Feel free to adapt these commands to match your environment and container registry.
-
----
-
-✅ Now the Mermaid block will render properly on GitHub, GitLab, VS Code preview, or any Markdown viewer with Mermaid enabled.  
-
-Do you want me to also **split into two diagrams** — one just for *training* and one just for *serving* — so the flow is clearer?
 
