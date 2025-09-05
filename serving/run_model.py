@@ -22,7 +22,7 @@ client = OpenAI(
 # Service Bus configuration from environment variables
 SERVICE_BUS_CONNECTION_STRING = os.getenv("SERVICE_BUS_CONNECTION_STRING")
 QUEUE_NAME = os.getenv("QUEUE_NAME", "commandqueue")
-task='Find how to create a azure foundry project. Use the tools neccessary. '
+task='Use the web to find the latest documentation for gemini api and how to use their new model called banana '
 placeholder = 'You are a helpful AI assistant. Make sure to use <think> and <solution> xml tags as it is very very crucial for user experience'
 # Get system prompt from environment variable
 system_prompt = os.getenv("SYSTEM_PROMPT", "You are a helpful AI assistant.")

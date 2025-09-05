@@ -90,11 +90,23 @@ def parse_json_from_tool_content(tool_content: str) -> Dict[str, Any]:
     import json
     
     try:
-        # Try to parse the content as JSON
+        # First try to parse the entire content as JSON
         parsed_json = json.loads(tool_content.strip())
         return parsed_json
-    except json.JSONDecodeError as e:
-        print(f"Warning: Failed to parse JSON from tool content: {e}")
+    except json.JSONDecodeError:
+        # If that fails, look for JSON patterns within the content
+        json_pattern = r'\{.*\}'
+        json_matches = re.findall(json_pattern, tool_content, re.DOTALL)
+        
+        for match in json_matches:
+            try:
+                parsed_json = json.loads(match.strip())
+                return parsed_json
+            except json.JSONDecodeError:
+                continue
+        
+        # If no valid JSON found, return raw content
+        print(f"Warning: Failed to parse JSON from tool content: No valid JSON found")
         return {"raw_content": tool_content.strip()}
 
 
@@ -109,6 +121,10 @@ def validate_tool_schema(tool_type: str, tool_data: Dict[str, Any]) -> bool:
     Returns:
         bool: True if valid, False otherwise
     """
+    # If we only have raw_content, the parsing failed
+    if "raw_content" in tool_data and len(tool_data) == 1:
+        return False
+    
     if tool_type == "web":
         required_keys = ["q", "k"]
         return all(key in tool_data for key in required_keys)
