@@ -14,6 +14,14 @@ logger = logging.getLogger(__name__)
 # Load environment variables from .env file
 load_dotenv()
 
+# NOTE: To use the GRPO-trained model, you need to:
+# 1. Stop your current vLLM server
+# 2. Start vLLM server with the GRPO-trained model:
+#    python -m vllm.entrypoints.openai.api_server \
+#    --model /home/ubuntu/GeneratorFS/grpo-qwen-training/checkpoint-100 \
+#    --served-model-name qwen-lora \
+#    --port 8000
+
 client = OpenAI(
     base_url=os.getenv("OPENAI_BASE_URL", "http://localhost:8000/v1"),
     api_key=os.getenv("OPENAI_API_KEY", "token-abc123"),
@@ -22,7 +30,7 @@ client = OpenAI(
 # Service Bus configuration from environment variables
 SERVICE_BUS_CONNECTION_STRING = os.getenv("SERVICE_BUS_CONNECTION_STRING")
 QUEUE_NAME = os.getenv("QUEUE_NAME", "commandqueue")
-task='Use the web to find the latest documentation for gemini api and how to use their new model called banana '
+task='Create a Python class for a user authentication system with methods for registration, login, password hashing, JWT token generation, and email verification. Include proper error handling, input validation, and security best practices. The class should work with SQLAlchemy models and include comprehensive docstrings.'
 placeholder = 'You are a helpful AI assistant. Make sure to use <think> and <solution> xml tags as it is very very crucial for user experience'
 # Get system prompt from environment variable
 system_prompt = os.getenv("SYSTEM_PROMPT", "You are a helpful AI assistant.")
