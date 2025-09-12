@@ -45,14 +45,31 @@ def main():
             print(json.dumps(payload, indent=2))
             last = payload
 
-            # Wait 5 seconds and send reward with same payload
-            time.sleep(5)
-            try:
-                print("Sending reward to reward queue:", json.dumps(payload))
-                resp = send_reward(REWARD_URL, payload)
-                print("Reward response:", resp)
-            except (HTTPError, URLError, TimeoutError) as e:
-                print(f"Failed to send reward: {e}")
+            # Decide whether to send a reward
+            def is_actionable(data) -> bool:
+                if not isinstance(data, dict):
+                    return False
+                # Skip idle/error or when receiver not started
+                if data.get("status") in {"idle", "error"}:
+                    return False
+                if data.get("message") == "Receiver not started":
+                    return False
+                # Actionable if we have q/k (data-only shape)
+                if ("q" in data and data.get("q")) or ("k" in data and data.get("k") is not None):
+                    return True
+                return False
+
+            if is_actionable(payload):
+                # Wait briefly and send reward with same payload
+                time.sleep(5)
+                try:
+                    print("Sending reward to reward queue:", json.dumps(payload))
+                    resp = send_reward(REWARD_URL, payload)
+                    print("Reward response:", resp)
+                except (HTTPError, URLError, TimeoutError) as e:
+                    print(f"Failed to send reward: {e}")
+            else:
+                print("No actionable command (idle or missing q/k); skipping reward send.")
 
         time.sleep(INTERVAL)
 

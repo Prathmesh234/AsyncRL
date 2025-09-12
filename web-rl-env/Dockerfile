@@ -4,6 +4,7 @@ FROM python:3.11-slim
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -21,15 +22,23 @@ WORKDIR /app
 
 # Copy project files
 COPY pyproject.toml ./
+COPY uv.lock ./
 COPY src/ ./src/
+COPY web_env/ ./web_env/
 COPY scripts/ ./scripts/
 
-# Install dependencies using uv (without frozen flag since no lock file exists)
-RUN uv sync
+# Install dependencies and browsers
+RUN mkdir -p /ms-playwright \
+ && chown -R root:root /ms-playwright \
+ && uv sync \
+ && uv add websocket-client \
+ && uv add playwright beautifulsoup4 \
+ && uv run playwright install --with-deps
 
 # Create non-root user for security
 RUN useradd --create-home --shell /bin/bash app \
-    && chown -R app:app /app
+    && chown -R app:app /app \
+    && chown -R app:app /ms-playwright
 USER app
 
 # Expose port
