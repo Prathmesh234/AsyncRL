@@ -1,3 +1,8 @@
+import os, sys
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PARENT_DIR = os.path.abspath(os.path.join(CURRENT_DIR, '..'))
+if PARENT_DIR not in sys.path:
+    sys.path.insert(0, PARENT_DIR)
 import torch
 from transformers import TextIteratorStreamer
 from threading import Thread
@@ -5,6 +10,12 @@ from trl import GRPOTrainer
 from parser import stream_parser
 import logging, warnings
 from transformers.utils import logging as hf_logging
+# Replace relative import with absolute to support script execution
+try:
+    from command_sender import send_web_command
+except ImportError:
+    # Fallback: attempt relative style if executed in package context
+    from ToolGRPOTrainer.command_sender import send_web_command
 
 # Minimal logging switches (debug prints removed)
 SHOW_DEBUG = False  # retained for future use if needed
@@ -14,12 +25,16 @@ hf_logging.get_logger("transformers.models.qwen3.modeling_qwen3").setLevel(loggi
 warnings.filterwarnings("ignore", message=".*Caching is incompatible with gradient checkpointing.*")
 
 # -------------------------------
-# Tool functions (single concise print each)
+# Tool functions
+# When <web>...</web> is produced in a streaming chunk, we call send_web_command,
+# which enqueues to commandqueue and polls rewardqueue for the correlated result.
+# The returned JSON is wrapped into <tool_result> so model can continue.
 # -------------------------------
 
 def run_web_tool(payload: str) -> str:
     print(f"[TOOL][web] payload={payload!r}")
-    return f"[web-result] searched: {payload} - Results: The answer is 42"
+    # payload is the inner text between <web>...</web>
+    return send_web_command(payload, k=3, timeout_s=15)
 
 def run_code_tool(payload: str) -> str:
     print(f"[TOOL][code] payload={payload!r}")
@@ -34,7 +49,15 @@ def run_azure_tool(payload: str) -> str:
 # -------------------------------
 
 class ToolCallingGRPOTrainer(GRPOTrainer):
-    """Extension of GRPOTrainer adding streaming + tool interleaving during TRAINING."""
+    """Extension of GRPOTrainer adding streaming + tool interleaving during TRAINING.
+
+    Flow per completion:
+      * Stream tokens
+      * Detect tool tag via stream_parser
+      * Execute corresponding run_*_tool (web -> waits for rewardqueue)
+      * Append <tool_result>...</tool_result> to conversation
+      * Continue generation until <solution> or repetition guard triggers
+    """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -88,6 +111,7 @@ class ToolCallingGRPOTrainer(GRPOTrainer):
                     tool_type = tool_call.get("type")
                     content = tool_call.get("content")
                     if tool_type == "web":
+                        # This will block until rewardqueue response (or timeout)
                         result = run_web_tool(content)
                     elif tool_type == "code":
                         result = run_code_tool(content)

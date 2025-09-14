@@ -30,7 +30,7 @@ client = OpenAI(
 # Service Bus configuration from environment variables
 SERVICE_BUS_CONNECTION_STRING = os.getenv("SERVICE_BUS_CONNECTION_STRING")
 QUEUE_NAME = os.getenv("QUEUE_NAME", "commandqueue")
-task='Create a Python class for a user authentication system with methods for registration, login, password hashing, JWT token generation, and email verification. Include proper error handling, input validation, and security best practices. The class should work with SQLAlchemy models and include comprehensive docstrings.'
+task = "Search the web for Azure Cognitive Services sentiment analysis API documentation, provision a Cognitive Services resource in Azure, and write a Python script using SQLAlchemy models to call the API for sentiment scoring on customer feedback data. Include error handling for API failures, logging, and a command-line interface to run inference on new inputs at runtime."
 placeholder = 'You are a helpful AI assistant. Make sure to use <think> and <solution> xml tags as it is very very crucial for user experience'
 # Get system prompt from environment variable
 system_prompt = os.getenv("SYSTEM_PROMPT", "You are a helpful AI assistant.")

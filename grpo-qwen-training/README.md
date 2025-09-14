@@ -4,8 +4,8 @@ library_name: transformers
 model_name: grpo-qwen-training
 tags:
 - generated_from_trainer
-- trl
 - grpo
+- trl
 licence: license
 ---
 
