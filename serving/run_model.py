@@ -3,14 +3,50 @@ import os
 from dotenv import load_dotenv
 import json
 import logging
-from parser import extract_all_content
-from servicebus_web import ServiceBusQueueWeb
-from servicebus_azure import ServiceBusQueueAzure
+from parser import stream_parser
+from ToolGRPOTrainer.command_sender import send_web_command
+from ToolGRPOTrainer.azure_command_sender import send_azure_command
+from ToolGRPOTrainer.code_command_sender import send_code_command
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Load environment variables from .env file
+load_dotenv()
+
+# Tool execution functions
+def run_web_tool(payload: str) -> str:
+    print(f"[TOOL][web] payload={payload!r}")
+    return send_web_command(payload, k=3, timeout_s=15)
+
+def run_code_tool(payload: str) -> str:
+    print(f"[TOOL][code] payload={payload!r}")
+    return send_code_command(payload, timeout_s=15)
+
+def run_azure_tool(payload: str) -> str:
+    print(f"[TOOL][azure] payload={payload!r}")
+    return send_azure_command(payload, timeout_s=15)
+
+# Load environment variables from .env file
+load_dotenv()
+
+# NOTE: To use the GRPO-trained model, you need to:
+# 1. Stop your current vLLM server
+# 2. Start vLLM server with the GRPO-trained model:
+#    python -m vllm.entrypoints.openai.api_server \
+#    --model /home/ubuntu/GeneratorFS/grpo-qwen-training/checkpoint-100 \
+#    --served-model-name qwen-lora \
+#    --port 8000
+
+client = OpenAI(
+    base_url=os.getenv("OPENAI_BASE_URL", "http://localhost:8000/v1"),
+    api_key=os.getenv("OPENAI_API_KEY", "token-abc123"),
+)
+
+# Service Bus configuration from environment variables
+SERVICE_BUS_CONNECTION_STRING = os.getenv("SERVICE_BUS_CONNECTION_STRING")
+QUEUE_NAME = os.getenv("QUEUE_NAME", "commandqueue")
 # Load environment variables from .env file
 load_dotenv()
 
@@ -35,96 +71,70 @@ placeholder = 'You are a helpful AI assistant. Make sure to use <think> and <sol
 # Get system prompt from environment variable
 system_prompt = os.getenv("SYSTEM_PROMPT", "You are a helpful AI assistant.")
 
-completion = client.chat.completions.create(
-    model="qwen-lora",
-    messages=[
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": task}
-    ]
-)
-
-# Parse all content using the parser module
-parsed_content = extract_all_content(completion.choices[0].message.content)
-
-response_data = {
-    "model": completion.model,
-    "role": completion.choices[0].message.role,
-    "content": parsed_content["clean_content"],
-    "reasoning": parsed_content["reasoning"],
-    "solution": parsed_content["solution"],
-    "tool_calls": parsed_content["tool_calls"],
-    "has_tools": parsed_content["has_tools"],
-    "valid_tools": parsed_content["valid_tools"],
-    "invalid_tools": parsed_content["invalid_tools"],
-    "usage": {
-        "prompt_tokens": completion.usage.prompt_tokens if completion.usage else None,
-        "completion_tokens": completion.usage.completion_tokens if completion.usage else None,
-        "total_tokens": completion.usage.total_tokens if completion.usage else None
-    },
-    "finish_reason": completion.choices[0].finish_reason
-}
-
-# Print the response data
-print(json.dumps(response_data, indent=2, ensure_ascii=False))
-
-def send_command(response_data):
-    """
-    Parse tool calls from response data and send to appropriate ServiceBus queues.
+def stream_generate_with_tools(messages, max_turns=6, turn_max_new_tokens=256):
+    """Generate tokens with streaming and real-time tool execution."""
+    print("[GEN] start")
+    conversation = ""
+    full_trace = ""
+    turns = 0
     
-    Args:
-        response_data (dict): The parsed response data containing tool calls
-    """
-    try:
-        # Get tool calls directly from response data
-        tool_calls = response_data.get("tool_calls", [])
+    while turns < max_turns:
+        buffer = ""
         
-        if not tool_calls:
-            logger.info("No tool calls found in response")
-            return
+        # Create streaming completion
+        stream = client.chat.completions.create(
+            model="qwen-lora",
+            messages=messages + [{"role": "assistant", "content": conversation}] if conversation else messages,
+            stream=True,
+            max_tokens=turn_max_new_tokens,
+            temperature=0.7
+        )
         
-        for tool_call in tool_calls:
-            tool_type = tool_call.get("type")
-            is_valid = tool_call.get("is_valid", False)
-            
-            if not is_valid:
-                logger.warning(f"Skipping invalid tool call of type: {tool_type}")
-                continue
+        tool_triggered = False
+        
+        for chunk in stream:
+            if chunk.choices[0].delta.content:
+                new_text = chunk.choices[0].delta.content
+                buffer += new_text
+                full_trace += new_text
                 
-            parsed_data = tool_call.get("parsed_data", {})
-            
-            # Route to appropriate ServiceBus queue based on tool type
-            if tool_type == "web":
-                web_content = {
-                    "q": parsed_data.get("q"),
-                    "k": parsed_data.get("k")
-                }
-                
-                with ServiceBusQueueWeb(SERVICE_BUS_CONNECTION_STRING) as web_queue:
-                    success = web_queue.send_web_result(web_content)
-                    if success:
-                        logger.info(f"Web tool call sent to web queue: {web_content}")
+                # Check for tool calls using stream_parser
+                tool_call = stream_parser(buffer)
+                if tool_call:
+                    tool_type = tool_call.get("type")
+                    content = tool_call.get("content")
+                    
+                    if tool_type == "web":
+                        result = run_web_tool(content)
+                    elif tool_type == "code":
+                        result = run_code_tool(content)
+                    elif tool_type == "azure":
+                        result = run_azure_tool(content)
                     else:
-                        logger.error("Failed to send web tool call to web queue")
+                        result = "[error] unknown tool"
+                    
+                    tool_result = f"<tool_result>{result}</tool_result>\n"
+                    conversation += buffer + tool_result
+                    full_trace += tool_result
+                    buffer = ""
+                    tool_triggered = True
+                    break
+        
+        if not tool_triggered:
+            conversation += buffer
+            
+        if "<solution>" in full_trace:
+            break
+            
+        turns += 1
+    
+    print(full_trace, flush=True)
+    return full_trace
 
-                        logger.error("Failed to send code tool call to code queue")
-                        
-            elif tool_type == "azure":
-                azure_content = {
-                    "args": parsed_data.get("args", [])
-                }
-                
-                with ServiceBusQueueAzure(SERVICE_BUS_CONNECTION_STRING) as azure_queue:
-                    success = azure_queue.send_azure_result(azure_content)
-                    if success:
-                        logger.info(f"Azure tool call sent to azure queue: {azure_content}")
-                    else:
-                        logger.error("Failed to send azure tool call to azure queue")
-                        
-            else:
-                logger.warning(f"Unknown tool type: {tool_type}")
-                
-    except Exception as e:
-        logger.error(f"Error sending commands to ServiceBus: {str(e)}")
-        print(f"Warning: Failed to send commands to ServiceBus - {str(e)}")  # Non-blocking error
-# Send the completion result to Service Bus queue
-send_command(response_data)
+# Execute streaming generation with tool support
+result = stream_generate_with_tools([
+    {"role": "system", "content": system_prompt},
+    {"role": "user", "content": task}
+])
+
+print(f"\n[FINAL RESULT]\n{result}")

@@ -13,9 +13,13 @@ from transformers.utils import logging as hf_logging
 # Replace relative import with absolute to support script execution
 try:
     from command_sender import send_web_command
+    from azure_command_sender import send_azure_command
+    from code_command_sender import send_code_command
 except ImportError:
     # Fallback: attempt relative style if executed in package context
     from ToolGRPOTrainer.command_sender import send_web_command
+    from ToolGRPOTrainer.azure_command_sender import send_azure_command
+    from ToolGRPOTrainer.code_command_sender import send_code_command
 
 # Minimal logging switches (debug prints removed)
 SHOW_DEBUG = False  # retained for future use if needed
@@ -38,11 +42,11 @@ def run_web_tool(payload: str) -> str:
 
 def run_code_tool(payload: str) -> str:
     print(f"[TOOL][code] payload={payload!r}")
-    return f"[code-result] executed: {payload} - Output: Hello, World!"
+    return send_code_command(payload, timeout_s=15)
 
 def run_azure_tool(payload: str) -> str:
     print(f"[TOOL][azure] payload={payload!r}")
-    return f"[azure-result] ran: {payload} - Status: Operation completed successfully"
+    return send_azure_command(payload, timeout_s=15)
 
 # -------------------------------
 # Custom Trainer with streaming rollouts
