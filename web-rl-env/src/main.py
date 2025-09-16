@@ -1,6 +1,6 @@
 import os, json, asyncio, logging
 from logging.handlers import RotatingFileHandler
-from typing import Optional, Any
+from typing import Optional, Any, Dict, List
 from fastapi import FastAPI
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -26,6 +26,29 @@ class CommandRequest(BaseModel):
 
 class RewardRequest(BaseModel):
     message: Any
+
+
+async def _emit_reward_payload(app: FastAPI, logger: logging.Logger, context: str, payload: Any) -> None:
+    """Send a payload through the reward queue with basic telemetry."""
+    rewardq = getattr(app.state, "reward_queue", None)
+    logger = logger or logging.getLogger("web_tool")
+
+    if not rewardq:
+        msg = f"[reward_queue] {context} (skipped: reward queue not configured)"
+        print(msg)
+        logger.warning(msg)
+        return
+
+    telemetry = f"[reward_queue] {context} -> queue='{REWARD_QUEUE_NAME}'"
+    print(telemetry)
+    logger.info(telemetry)
+
+    try:
+        await rewardq.send(payload)
+    except Exception as exc:
+        err_msg = f"[reward_queue] failed to publish {context}: {exc}"
+        print(err_msg)
+        logger.exception(err_msg)
 
 # ✅ DO NOT hardcode secrets; use env var
 # Use .get so a missing env var does not throw a TypeError
@@ -149,37 +172,92 @@ async def receive_command(command: CommandRequest):
 
         # 4) Run the WebTool if we have a query; print results only
         if q:
+            tool: WebTool = getattr(app.state, "web_tool", None) or WebTool()
+            app.state.web_tool = tool
+            logger: logging.Logger = getattr(app.state, "logger", logging.getLogger("web_tool"))
+            kk = int(k) if isinstance(k, (int, float, str)) and str(k).isdigit() else 3
+            start_msg = f"[web_tool] starting query='{str(q)}' k={kk}"
+            print(start_msg)
+            logger.info(start_msg)
+
+            normalized_results: List[Dict[str, Any]] = []
+            reward_status = "success"
+            reward_error: Optional[str] = None
+            has_result_error = False
+
             try:
-                tool: WebTool = getattr(app.state, "web_tool", None) or WebTool()
-                app.state.web_tool = tool
-                logger: logging.Logger = getattr(app.state, "logger", logging.getLogger("web_tool"))
-                kk = int(k) if isinstance(k, (int, float, str)) and str(k).isdigit() else 3
-                start_msg = f"[web_tool] starting query='{str(q)}' k={kk}"
-                print(start_msg)
-                logger.info(start_msg)
                 results = await tool.run(str(q), kk)
                 if not results:
+                    reward_status = "no_results"
                     nores = f"[web_tool] no results for query='{str(q)}'"
                     print(nores)
                     logger.info(nores)
-                for r in results:
+                for idx, r in enumerate(results or []):
                     url = r.get("url", "")
                     title = r.get("title", "")
                     content = r.get("content", "")
                     if r.get("error"):
+                        has_result_error = True
                         msg = f"[web_tool] ERROR url={url} err={r['error']}"
                         print(msg)
                         logger.info(msg)
+                        entry: Dict[str, Any] = {
+                            "rank": idx + 1,
+                            "url": url,
+                            "title": title,
+                            "error": r.get("error"),
+                        }
                     else:
                         snippet = (content or "")[:200].replace("\n", " ")
                         msg = f"[web_tool] url={url}\n  title={title}\n  content={snippet}..."
                         print(msg)
                         logger.info(msg)
+                        entry = {
+                            "rank": idx + 1,
+                            "url": url,
+                            "title": title,
+                            "snippet": (content or "").replace("\n", " ")[:500],
+                        }
+
+                    if "score" in r and r["score"] is not None:
+                        entry["score"] = r["score"]
+                    if "source" in r and r["source"]:
+                        entry["source"] = r["source"]
+                    if "metadata" in r and r["metadata"]:
+                        entry["metadata"] = r["metadata"]
+
+                    normalized_results.append(entry)
+
+                if has_result_error and reward_status == "success":
+                    reward_status = "partial"
+
             except Exception as e:
+                reward_status = "error"
+                reward_error = str(e)
                 msg = f"[web_tool] failed to run: {e}"
                 print(msg)
-                logger = getattr(app.state, "logger", logging.getLogger("web_tool"))
                 logger.exception(msg)
+
+            reward_payload: Dict[str, Any] = {
+                "type": "web_tool_results",
+                "query": str(q),
+                "k": kk,
+                "status": reward_status,
+                "result_count": len(normalized_results),
+                "results": normalized_results,
+            }
+            if reward_error:
+                reward_payload["error"] = reward_error
+
+            query_text = str(q)
+            query_preview = query_text if len(query_text) <= 120 else f"{query_text[:117]}..."
+
+            await _emit_reward_payload(
+                app,
+                logger,
+                f"web_tool {reward_status} query={query_preview!r}",
+                reward_payload,
+            )
 
         return {"success": True, "message": "Command sent to Service Bus", "message_id": msg_id}
     except Exception as e:
