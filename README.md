@@ -4,7 +4,7 @@ This repository contains multiple RL projects focused on training language model
 
 ## Pretty cool Feature 
 
-By default, GRPOTrainer from huggingface does not enable interleaved tool calling while generating tokens for completitions in GRPO. Had to write custom functions to overwrite it (shoutout to codex for helping me out here). 
+By default, GRPOTrainer from huggingface does not enable interleaved tool calling while generating tokens for completitions in GRPO. Had to write custom functions to overwrite it (shoutout to codex for helping me out here - You can find the implementation under ToolGRPOTrainer under serving folder). 
 
 ## 📁 Project Structure
 
