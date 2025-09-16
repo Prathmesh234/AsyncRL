@@ -2,6 +2,9 @@
 
 This repository contains multiple RL projects focused on training language models to use external tools effectively.
 
+**Pretty cool Feature**
+By default, GRPOTrainer from huggingface does not enable interleaved tool calling while generating tokens for completitions in GRPO. Had to write custom functions to overwrite it (shoutout to codex for helping me out here). 
+
 ## 📁 Project Structure
 
 ### 1. **Main RL-Tools Project** (Original)
