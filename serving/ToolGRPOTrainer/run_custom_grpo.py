@@ -17,18 +17,23 @@ WE HAVE OPTIMIZE THE PROMPT AND MAKE SURE IT USES THE PROMPT IN THE .env fle
 '''
 SYSTEM_PROMPT = os.getenv(
     "SYSTEM_PROMPT",
-    "You are a helpful AI assistant with access to three tools.\n"
-    "Tools: <web>{query}</web> for web search. <code>{code}</code> to run code (JSON with cmd,cwd,timeout_s). <azure>{azure}</azure> for Azure CLI (JSON with args list).\n"
-    "Decide if a tool is needed BEFORE answering. If you use a tool, emit only the tool tag, wait for <tool_result> then continue reasoning. Finish final answer inside <solution>...</solution>."
+    (
+        "You are a helpful AI assistant with access to three tools.\n"
+        "Use STRICT JSON payloads inside tool tags:\n"
+        '- <web>{"q": "search terms", "k": NUMBER}</web>\n'
+        '- <code>{"code_command": "shell command"}</code>\n'
+        '- <azure>{"azure_command": "azure cli command"}</azure>\n'
+        "Decide if a tool is needed BEFORE answering. If you use a tool, emit only the tool tag, wait for <tool_result> then continue reasoning. Finish final answer inside <solution>...</solution>."
+    )
 )
 
 USER_TASKS = [
     # Force explicit web tool call (restored explicit tag)
     "Find the latest stable Python version via the web tool then give final answer",
     # Force explicit code tool call
-    "Write and execute Python code to print the sum of the first 5 integers: <code>{\"cmd\": \"python -c 'print(sum(range(1,6)))'\", \"cwd\": \".\", \"timeout_s\": 5}</code> then confirm the result.",
+    "Write and execute Python code to print the sum of the first 5 integers: <code>{\"code_command\": \"python -c 'print(sum(range(1,6)))'\"}</code> then confirm the result.",
     # Force explicit azure tool call
-    "Simulate an Azure CLI docs lookup using the azure tool: <azure>{\"args\": [\"az account show --query name -o tsv\"]}</azure> then summarize what it does.",
+    "Simulate an Azure CLI docs lookup using the azure tool: <azure>{\"azure_command\": \"az account show --query name -o tsv\"}</azure> then summarize what it does.",
 ]
 
 # Wrap prompts similarly to run_grpo.py so formatting is consistent

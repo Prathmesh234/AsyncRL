@@ -7,6 +7,7 @@ from parser import stream_parser
 from ToolGRPOTrainer.command_sender import send_web_command
 from ToolGRPOTrainer.azure_command_sender import send_azure_command
 from ToolGRPOTrainer.code_command_sender import send_code_command
+from validation import ensure_web_payload, ensure_code_payload, ensure_azure_payload
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -18,15 +19,27 @@ load_dotenv()
 # Tool execution functions
 def run_web_tool(payload: str) -> str:
     print(f"[TOOL][web] payload={payload!r}")
-    return send_web_command(payload, k=3, timeout_s=15)
+    try:
+        web_payload = ensure_web_payload(payload)
+    except Exception as exc:
+        return f"[web-error] {exc}"
+    return send_web_command(web_payload, timeout_s=15)
 
 def run_code_tool(payload: str) -> str:
     print(f"[TOOL][code] payload={payload!r}")
-    return send_code_command(payload, timeout_s=15)
+    try:
+        code_payload = ensure_code_payload(payload)
+    except Exception as exc:
+        return f"[code-error] {exc}"
+    return send_code_command(code_payload, timeout_s=15)
 
 def run_azure_tool(payload: str) -> str:
     print(f"[TOOL][azure] payload={payload!r}")
-    return send_azure_command(payload, timeout_s=15)
+    try:
+        azure_payload = ensure_azure_payload(payload)
+    except Exception as exc:
+        return f"[azure-error] {exc}"
+    return send_azure_command(azure_payload, timeout_s=15)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -80,6 +93,12 @@ ALLOWED TAGS ONLY
 - <azure>...</azure> — whitelisted Azure CLI subcommands.
 - <solution>...</solution> — final answer for the user.
 Do not use any other tags, formats, or tools.
+
+TOOL PAYLOAD FORMAT (MANDATORY)
+- <web> content MUST be JSON exactly like {"q": "search terms", "k": INTEGER}. Provide the desired search in "q" and a numeric top-k in "k".
+- <code> content MUST be JSON exactly like {"code_command": "shell command"}.
+- <azure> content MUST be JSON exactly like {"azure_command": "azure cli command"}.
+Do not include extra keys or text inside tool tags.
 
 TURN PROTOCOL (STRICT)
 1) In <think>, decide exactly ONE next action and why.

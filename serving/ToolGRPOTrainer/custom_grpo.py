@@ -39,16 +39,27 @@ warnings.filterwarnings("ignore", message=".*Caching is incompatible with gradie
 def run_web_tool(payload: str) -> str:
     print(f"[TOOL][web] payload={payload!r}")
     # Validate and normalize to the exact format the container expects
-    web = ensure_web_payload(payload, default_k=3)  # => {"q": str, "k": int}
-    return send_web_command(web["q"], k=int(web.get("k", 3)), timeout_s=15)
+    try:
+        web = ensure_web_payload(payload, default_k=3)  # => {"q": str, "k": int}
+    except Exception as exc:
+        return f"[web-error] {exc}"
+    return send_web_command(web, timeout_s=15)
 
 def run_code_tool(payload: str) -> str:
     print(f"[TOOL][code] payload={payload!r}")
-    return f"[code-result] executed: {payload} - Output: Hello, World!"
+    try:
+        code_payload = ensure_code_payload(payload)
+    except Exception as exc:
+        return f"[code-error] {exc}"
+    return send_code_command(code_payload, timeout_s=15)
 
 def run_azure_tool(payload: str) -> str:
     print(f"[TOOL][azure] payload={payload!r}")
-    return f"[azure-result] ran: {payload} - Status: Operation completed successfully"
+    try:
+        azure_payload = ensure_azure_payload(payload)
+    except Exception as exc:
+        return f"[azure-error] {exc}"
+    return send_azure_command(azure_payload, timeout_s=15)
 
 # -------------------------------
 # Custom Trainer with streaming rollouts

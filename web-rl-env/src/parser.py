@@ -26,24 +26,35 @@ def parse_received_command(obj: Union[str, Dict[str, Any]]) -> Optional[Dict[str
     return None
 
 
+def _extract_from_mapping(mapping: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(mapping, dict):
+        return None
+    q = mapping.get("q")
+    k = mapping.get("k")
+    if q is None and k is None:
+        return None
+    return {"q": q, "k": k}
+
+
 def extract_qk_from_data(received_command: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """
     Given a parsed received_command dict, extract the `q` and `k` fields
-    from its `data` object, if present. Returns None if unavailable.
+    regardless of whether they are top-level or nested inside "data".
+    Returns None if unavailable.
     """
     if not isinstance(received_command, dict):
         return None
 
-    data = received_command.get("data")
-    if not isinstance(data, dict):
-        return None
+    direct = _extract_from_mapping(received_command)
+    if direct:
+        return direct
 
-    q = data.get("q")
-    k = data.get("k")
-    if q is None and k is None:
-        return None
+    for key in ("data", "action", "parameters"):
+        nested = _extract_from_mapping(received_command.get(key))
+        if nested:
+            return nested
 
-    return {"q": q, "k": k}
+    return None
 
 
 def parse_read_command_payload(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -62,5 +73,9 @@ def parse_read_command_payload(payload: Dict[str, Any]) -> Optional[Dict[str, An
         raw = payload.get("raw_content")
         parsed = parse_received_command(raw)
 
-    return extract_qk_from_data(parsed)
+    extracted = extract_qk_from_data(parsed)
+    if extracted:
+        return extracted
+
+    return extract_qk_from_data(payload)
 

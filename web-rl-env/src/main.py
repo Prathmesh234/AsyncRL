@@ -2,7 +2,7 @@ import os, json, asyncio, logging
 from typing import Optional, Any, Dict, List
 from fastapi import FastAPI
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from azure.servicebus import ServiceBusClient, ServiceBusMessage, TransportType
 from azure.servicebus.aio import ServiceBusClient as AioServiceBusClient
 from .command_queue import CommandQueue
@@ -18,9 +18,13 @@ load_dotenv()
 app = FastAPI(title="Simple Web RL Environment", version="0.2.3")
 
 class CommandRequest(BaseModel):
-    command_type: str
+    command_type: Optional[str] = None
     action: Optional[Any] = None
     parameters: Optional[dict] = None
+    q: Optional[str] = None
+    k: Optional[int] = None
+
+    model_config = ConfigDict(extra="allow")
 
 
 class RewardRequest(BaseModel):
@@ -97,7 +101,8 @@ async def receive_command(command: CommandRequest):
     try:
         # 1) Send to Service Bus (keep original behavior)
         msg_id = str(uuid4())
-        payload = json.dumps(command.dict())
+        payload_dict = command.model_dump(exclude_none=True)
+        payload = json.dumps(payload_dict)
         message = ServiceBusMessage(payload, message_id=msg_id)
         with servicebus_client:
             with servicebus_client.get_queue_sender(COMMAND_QUEUE_NAME) as sender:
@@ -108,7 +113,7 @@ async def receive_command(command: CommandRequest):
         k = None
         # Prefer a top-level `data` shape if present in action/parameters
         # This keeps compatibility with the CommandQueue parser
-        body_dict = command.dict()
+        body_dict = payload_dict
         # a) Directly in parameters
         if isinstance(body_dict.get("parameters"), dict):
             params = body_dict["parameters"]
@@ -118,6 +123,11 @@ async def receive_command(command: CommandRequest):
         if q is None and isinstance(body_dict.get("action"), dict):
             q = body_dict["action"].get("q", q)
             k = body_dict["action"].get("k", k)
+        # c) Allow direct top-level q/k
+        if q is None and body_dict.get("q") is not None:
+            q = body_dict.get("q")
+        if k is None and body_dict.get("k") is not None:
+            k = body_dict.get("k")
 
         # 3) If not found, poll the in-memory `/read-command` view briefly
         #    to leverage the parsed content from CommandQueue
