@@ -7,21 +7,39 @@ import re
 from typing import List, Dict, Any, Tuple
 
 
+def _extract_tag(content: str, tag: str) -> List[Tuple[int, str]]:
+    """Return list of (start_index, inner_text) for each completed tag occurrence."""
+    open_tag = f"<{tag}>"
+    close_tag = f"</{tag}>"
+    matches: List[Tuple[int, str]] = []
+    search_pos = 0
+    while True:
+        start = content.find(open_tag, search_pos)
+        if start == -1:
+            break
+        end = content.find(close_tag, start + len(open_tag))
+        if end == -1:
+            break
+        inner = content[start + len(open_tag):end]
+        matches.append((start, inner))
+        search_pos = end + len(close_tag)
+    return matches
+
+
 def stream_parser(buffer: str):
     """
     Detect complete tool tags in a streaming buffer.
     Returns {"type": tool_type, "content": payload} if found, else None.
     """
-    patterns = {
-        "web": r"<web>(.*?)</web>",
-        "code": r"<code>(.*?)</code>",
-        "azure": r"<azure>(.*?)</azure>",
-    }
-    for ttype, pat in patterns.items():
-        match = re.search(pat, buffer, re.DOTALL)
-        if match:
-            content = match.group(1).strip()
-            return {"type": ttype, "content": content}
+    earliest = None
+    for tool in ("web", "code", "azure"):
+        matches = _extract_tag(buffer, tool)
+        if matches:
+            start, inner = matches[0]
+            if earliest is None or start < earliest[0]:
+                earliest = (start, tool, inner.strip())
+    if earliest:
+        return {"type": earliest[1], "content": earliest[2]}
     return None
 
 
@@ -46,14 +64,9 @@ def parse_thinking_tags(content: str) -> Tuple[str, str, str]:
 def parse_tool_tags(content: str) -> List[Dict[str, Any]]:
     """Return list of tool calls with type and content."""
     tool_calls = []
-    for tool_type, pattern in {
-        "web": r'<web>(.*?)</web>',
-        "code": r'<code>(.*?)</code>',
-        "azure": r'<azure>(.*?)</azure>',
-    }.items():
-        matches = re.findall(pattern, content, re.DOTALL)
-        for match in matches:
-            tool_calls.append({"type": tool_type, "content": match.strip()})
+    for tool_type in ("web", "code", "azure"):
+        for _, inner in _extract_tag(content, tool_type):
+            tool_calls.append({"type": tool_type, "content": inner.strip()})
     return tool_calls
 
 
@@ -79,8 +92,8 @@ def validate_tool_schema(tool_type: str, tool_data: Dict[str, Any]) -> bool:
         return False
     schemas = {
         "web": ["q", "k"],
-        "code": ["cmd", "cwd", "timeout_s"],
-        "azure": ["args"],
+        "code": ["code_command"],
+        "azure": ["azure_command"],
     }
     required = schemas.get(tool_type)
     if required is None:

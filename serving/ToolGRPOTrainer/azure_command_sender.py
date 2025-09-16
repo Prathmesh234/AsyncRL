@@ -2,6 +2,7 @@ import os
 import json
 import asyncio
 import logging
+from typing import Any, Dict
 from uuid import uuid4
 from dotenv import load_dotenv
 from servicebus_web import ServiceBusQueueWeb
@@ -14,7 +15,7 @@ WEB_QUEUE_NAME = os.getenv("QUEUE_NAME", "commandqueue")  # queue to send comman
 REWARD_QUEUE_NAME = os.getenv("REWARD_QUEUE_NAME", "rewardqueue")  # queue to receive results
 
 
-def send_azure_command(payload: str, k: int = 3, timeout_s: int = 10) -> str:
+def send_azure_command(payload: Dict[str, Any], timeout_s: int = 10) -> str:
     """Send an azure tool command to Service Bus and wait briefly for a response from reward queue.
 
     Flow:
@@ -25,8 +26,12 @@ def send_azure_command(payload: str, k: int = 3, timeout_s: int = 10) -> str:
     if not SERVICE_BUS_CONNECTION_STRING:
         return "[azure-error] Missing SERVICE_BUS_CONNECTION_STRING env var"
 
+    command = str(payload.get("azure_command", "")).strip()
+    if not command:
+        return "[azure-error] Empty azure command"
+
     request_id = str(uuid4())
-    message = {"azure_command": payload, "request_id": request_id, "type": "azure_command"}
+    message = {"azure_command": command, "request_id": request_id, "type": "azure_command"}
 
     try:
         # Send request (re-using send_web_result for simplicity)
