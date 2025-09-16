@@ -2,38 +2,35 @@
 FROM python:3.11-slim
 
 # Set environment variables
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Install minimal system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv package manager
-RUN pip install uv
-
-RUN pip install --no-cache-dir websocket-client
-
+RUN pip install --no-cache-dir uv
 
 # Set working directory
 WORKDIR /app
 
-# Copy project files
-COPY pyproject.toml ./
-COPY uv.lock ./
+# Install Python dependencies using lockfile for reproducibility
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev
+
+# Install only the Chromium browser to reduce image size
+RUN mkdir -p /ms-playwright \
+ && chown -R root:root /ms-playwright \
+ && uv run python -m playwright install --with-deps chromium \
+ && rm -rf /root/.cache
+
+# Copy application source
 COPY src/ ./src/
 COPY web_env/ ./web_env/
 COPY scripts/ ./scripts/
-
-# Install dependencies and browsers
-RUN mkdir -p /ms-playwright \
- && chown -R root:root /ms-playwright \
- && uv sync \
- && uv add websocket-client \
- && uv add playwright beautifulsoup4 \
- && uv run playwright install --with-deps
 
 # Create non-root user for security
 RUN useradd --create-home --shell /bin/bash app \

@@ -1,5 +1,4 @@
 import os, json, asyncio, logging
-from logging.handlers import RotatingFileHandler
 from typing import Optional, Any, Dict, List
 from fastapi import FastAPI
 from fastapi.responses import Response
@@ -16,7 +15,7 @@ from web_env.web_tool import WebTool
 # Load environment variables from .env file
 load_dotenv()
 
-app = FastAPI(title="Simple Web RL Environment", version="0.2.1")
+app = FastAPI(title="Simple Web RL Environment", version="0.2.3")
 
 class CommandRequest(BaseModel):
     command_type: str
@@ -27,28 +26,6 @@ class CommandRequest(BaseModel):
 class RewardRequest(BaseModel):
     message: Any
 
-
-async def _emit_reward_payload(app: FastAPI, logger: logging.Logger, context: str, payload: Any) -> None:
-    """Send a payload through the reward queue with basic telemetry."""
-    rewardq = getattr(app.state, "reward_queue", None)
-    logger = logger or logging.getLogger("web_tool")
-
-    if not rewardq:
-        msg = f"[reward_queue] {context} (skipped: reward queue not configured)"
-        print(msg)
-        logger.warning(msg)
-        return
-
-    telemetry = f"[reward_queue] {context} -> queue='{REWARD_QUEUE_NAME}'"
-    print(telemetry)
-    logger.info(telemetry)
-
-    try:
-        await rewardq.send(payload)
-    except Exception as exc:
-        err_msg = f"[reward_queue] failed to publish {context}: {exc}"
-        print(err_msg)
-        logger.exception(err_msg)
 
 # ✅ DO NOT hardcode secrets; use env var
 # Use .get so a missing env var does not throw a TypeError
@@ -74,27 +51,16 @@ aio_servicebus_client = AioServiceBusClient.from_connection_string(
 
 @app.on_event("startup")
 async def _startup():
-    # Set up simple file logging for web tool outputs
+    # Simple concise console logger
     def _setup_logger() -> logging.Logger:
-        logs_dir = os.environ.get("LOGS_DIR", "/app/logs")
-        os.makedirs(logs_dir, exist_ok=True)
-        log_path = os.path.join(logs_dir, "web_tool.log")
-
         logger = logging.getLogger("web_tool")
         if logger.handlers:
             return logger
         logger.setLevel(logging.INFO)
-
         fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
-
-        file_handler = RotatingFileHandler(log_path, maxBytes=5 * 1024 * 1024, backupCount=3)
-        file_handler.setFormatter(fmt)
-        logger.addHandler(file_handler)
-
         stream_handler = logging.StreamHandler()
         stream_handler.setFormatter(fmt)
         logger.addHandler(stream_handler)
-
         return logger
 
     app.state.logger = _setup_logger()
@@ -102,7 +68,7 @@ async def _startup():
     # Start background async receiver (push-style)
     app.state.cmd_queue = CommandQueue(aio_servicebus_client, COMMAND_QUEUE_NAME)
     await app.state.cmd_queue.start()
-    # Prepare reward sender
+    # Prepare reward sender (always enabled)
     app.state.reward_queue = RewardQueue(aio_servicebus_client, REWARD_QUEUE_NAME)
 
 
@@ -170,7 +136,7 @@ async def receive_command(command: CommandRequest):
                     break
                 await asyncio.sleep(0.5)
 
-        # 4) Run the WebTool if we have a query; print results only
+        # 4) Run the WebTool if we have a query; send results to reward queue
         if q:
             tool: WebTool = getattr(app.state, "web_tool", None) or WebTool()
             app.state.web_tool = tool
@@ -252,14 +218,14 @@ async def receive_command(command: CommandRequest):
             query_text = str(q)
             query_preview = query_text if len(query_text) <= 120 else f"{query_text[:117]}..."
 
-            await _emit_reward_payload(
-                app,
-                logger,
-                f"web_tool {reward_status} query={query_preview!r}",
-                reward_payload,
-            )
+            # Publish to reward queue
+            try:
+                await app.state.reward_queue.send(reward_payload)
+            except Exception as exc:
+                logger.exception(f"[reward_queue] failed to publish results: {exc}")
 
-        return {"success": True, "message": "Command sent to Service Bus", "message_id": msg_id}
+        # Return a simple success response; results go to reward queue
+        return {"success": True, "message": "Processed and dispatched to reward queue", "message_id": msg_id}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
