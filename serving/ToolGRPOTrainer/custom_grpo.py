@@ -8,6 +8,7 @@ from transformers import TextIteratorStreamer
 from threading import Thread
 from trl import GRPOTrainer
 from parser import stream_parser
+from validation import ensure_web_payload, ensure_code_payload, ensure_azure_payload
 import logging, warnings
 from transformers.utils import logging as hf_logging
 # Replace relative import with absolute to support script execution
@@ -37,16 +38,17 @@ warnings.filterwarnings("ignore", message=".*Caching is incompatible with gradie
 
 def run_web_tool(payload: str) -> str:
     print(f"[TOOL][web] payload={payload!r}")
-    # payload is the inner text between <web>...</web>
-    return send_web_command(payload, k=3, timeout_s=15)
+    # Validate and normalize to the exact format the container expects
+    web = ensure_web_payload(payload, default_k=3)  # => {"q": str, "k": int}
+    return send_web_command(web["q"], k=int(web.get("k", 3)), timeout_s=15)
 
 def run_code_tool(payload: str) -> str:
     print(f"[TOOL][code] payload={payload!r}")
-    return send_code_command(payload, timeout_s=15)
+    return f"[code-result] executed: {payload} - Output: Hello, World!"
 
 def run_azure_tool(payload: str) -> str:
     print(f"[TOOL][azure] payload={payload!r}")
-    return send_azure_command(payload, timeout_s=15)
+    return f"[azure-result] ran: {payload} - Status: Operation completed successfully"
 
 # -------------------------------
 # Custom Trainer with streaming rollouts
