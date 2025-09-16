@@ -7,7 +7,6 @@ from urllib.error import URLError, HTTPError
 
 
 URL = os.environ.get("READ_COMMAND_URL", "http://localhost:8000/read-command")
-REWARD_URL = os.environ.get("REWARD_URL", "http://localhost:8000/send-reward")
 INTERVAL = float(os.environ.get("READ_COMMAND_INTERVAL", "2"))
 
 
@@ -17,17 +16,9 @@ def fetch(url: str):
         return json.loads(data.decode("utf-8", errors="replace"))
 
 
-def send_reward(url: str, message):
-    body = json.dumps({"message": message}).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=body,
-        method="POST",
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=5) as resp:
-        data = resp.read()
-        return json.loads(data.decode("utf-8", errors="replace"))
+def send_reward(*args, **kwargs):
+    # Disabled: web tool results are published by the server; do not echo commands to reward queue.
+    return {"disabled": True}
 
 
 def main():
@@ -59,17 +50,11 @@ def main():
                     return True
                 return False
 
+            # Do not send rewards from this script. The server runs the WebTool and publishes results.
             if is_actionable(payload):
-                # Wait briefly and send reward with same payload
-                time.sleep(5)
-                try:
-                    print("Sending reward to reward queue:", json.dumps(payload))
-                    resp = send_reward(REWARD_URL, payload)
-                    print("Reward response:", resp)
-                except (HTTPError, URLError, TimeoutError) as e:
-                    print(f"Failed to send reward: {e}")
+                print("Actionable command observed; server will process via WebTool and publish reward.")
             else:
-                print("No actionable command (idle or missing q/k); skipping reward send.")
+                print("No actionable command (idle or missing q/k).")
 
         time.sleep(INTERVAL)
 
