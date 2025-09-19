@@ -26,11 +26,11 @@ A malformed payload returns `[type-error] ...` to the model without touching Ser
 All three helpers delegate to `send_*_command` in `serving/ToolGRPOTrainer/`:
 1. Generate a `request_id = uuid4()` for correlation.
 2. Construct the command envelope and label it with `type`:
-   - Web: `{ "q", "k", "request_id", "type": "web_command" }`.
-   - Code: `{ "code_command", "request_id", "type": "code_command" }`.
-   - Azure: `{ "azure_command", "request_id", "type": "azure_command" }`.
+   - Web: `{ "type": "web", "q", "k", "request_id" }`.
+   - Code: `{ "type": "code", "code_command", "request_id" }`.
+   - Azure: `{ "type": "azure", "azure_command", "request_id" }`.
 3. Open a `ServiceBusQueueWeb` context targeting the command queue (`QUEUE_NAME`).
-4. Call `send_web_result(...)` which wraps the payload as `{ "type": "web_result", "request_id": ..., "data": ... }` before sending a `ServiceBusMessage`.
+4. Call `send_web_result(..., wrap=False)` so the Service Bus message body remains the original `{"type", "q", "k", "request_id"}` payload (top-level `type`/`q`/`k` keeps downstream readers simple).
 5. Return early with `[type-error] ...` if connection details are missing, the payload is empty, or the send operation fails.
 
 ## Reward polling

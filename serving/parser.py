@@ -98,6 +98,8 @@ def validate_tool_schema(tool_type: str, tool_data: Dict[str, Any]) -> bool:
     required = schemas.get(tool_type)
     if required is None:
         return False
+    if tool_data.get("type") != tool_type:
+        return False
     return all(key in tool_data for key in required)
 
 

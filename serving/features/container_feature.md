@@ -9,17 +9,17 @@ The orchestrator agent supports three main tool categories:
 1. **Web Tool** (`<web></web>`)
    - Purpose: API-based web searches and document retrieval
    - Container: Web browser container
-   - Usage: `<web>{query, top_k}</web>`
+   - Usage: `<web>{"type": "web", "q": "search terms", "k": 3}</web>`
 
 2. **Code Execution Tool** (`<code></code>`)
    - Purpose: Running commands and executing code in workspace
    - Container: Code execution container
-   - Usage: `<code>{code to be executed}</code>`
+   - Usage: `<code>{"type": "code", "code_command": "shell command"}</code>`
 
 3. **Azure Tool** (`<azure></azure>`)
    - Purpose: Azure infrastructure commands and operations
    - Container: Azure container
-   - Usage: `<azure>{terminal_commands}</azure>`
+   - Usage: `<azure>{"type": "azure", "azure_command": "az subcommand"}</azure>`
 
 ## Implementation Details
 
@@ -51,9 +51,9 @@ When tool tags are detected, the system prints:
 
 ### New Regex Patterns:
 ```python
-web_pattern = r'<web>(.*?)</web>'
-code_pattern = r'<code>(.*?)</code>'
-azure_pattern = r'<azure>(.*?)</azure>'
+web_pattern = r'<web>\s*(\{[^}]+\})\s*</web>'
+code_pattern = r'<code>\s*(\{[^}]+\})\s*</code>'
+azure_pattern = r'<azure>\s*(\{[^}]+\})\s*</azure>'
 ```
 
 ## Future Enhancements

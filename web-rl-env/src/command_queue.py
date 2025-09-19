@@ -52,17 +52,26 @@ class CommandQueue:
                         except Exception:
                             parsed = None
 
-                        # Expect only top-level {q, k}
-                        qk: Optional[Dict[str, Any]] = None
+                        # Preserve a subset of relevant fields for the monitoring endpoints.
+                        subset: Optional[Dict[str, Any]] = None
                         if isinstance(parsed, dict):
-                            q = parsed.get("q")
-                            k = parsed.get("k")
-                            if q is not None or k is not None:
-                                qk = {"q": q, "k": k}
+                            keys_of_interest = (
+                                "type",
+                                "q",
+                                "k",
+                                "code_command",
+                                "azure_command",
+                                "request_id",
+                            )
+                            subset = {
+                                key: parsed.get(key)
+                                for key in keys_of_interest
+                                if parsed.get(key) is not None
+                            } or None
 
                         self.current_command = {
                             "received_command": parsed if parsed is not None else raw_text,
-                            "data": qk,
+                            "data": subset,
                             "message_id": str(msg.message_id),
                             "raw_content": raw_text,
                             "content_type": "bytes",

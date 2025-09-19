@@ -45,8 +45,18 @@ def main():
                     return False
                 if data.get("message") == "Receiver not started":
                     return False
-                # Actionable if we have q/k (data-only shape)
-                if ("q" in data and data.get("q")) or ("k" in data and data.get("k") is not None):
+
+                payload_type = (data.get("type") or "").strip().lower()
+
+                if payload_type == "web":
+                    return bool(data.get("q"))
+                if payload_type == "code":
+                    return bool(data.get("code_command"))
+                if payload_type == "azure":
+                    return bool(data.get("azure_command"))
+
+                # Fallback for legacy payloads without an explicit type
+                if data.get("q") or data.get("code_command") or data.get("azure_command"):
                     return True
                 return False
 

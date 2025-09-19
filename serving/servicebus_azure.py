@@ -35,49 +35,44 @@ class ServiceBusQueueAzure:
             self.client.close()
             
     def send_azure_result(self, response_data: Dict[str, Any], 
-                         request_id: Optional[str] = None) -> bool:
-        """
-        Send an azure result to the Service Bus queue with proper formatting.
-        
-        Args:
-            response_data (Dict[str, Any]): The azure response data
-            request_id (Optional[str]): Optional request ID for tracking
-            
-        Returns:
-            bool: True if message was sent successfully, False otherwise
-        """
+                         request_id: Optional[str] = None,
+                         *,
+                         wrap: bool = True,
+                         message_type: Optional[str] = "azure_result") -> bool:
+        """Send payload to the Service Bus queue."""
         try:
             if not self.client:
                 logger.error("Service Bus client is not initialized. Use as context manager.")
                 return False
-            
-            # Add metadata to the message
-            message_payload = {
-                "type": "azure_result",
-                "timestamp": None,  # Will be set by Service Bus
-                "request_id": request_id,
-                "data": response_data
-            }
-            
-            # Convert the data to JSON string
+
+            if wrap:
+                message_payload: Dict[str, Any] = {
+                    "type": message_type or "azure_result",
+                    "timestamp": None,
+                    "request_id": request_id,
+                    "data": response_data,
+                }
+            else:
+                message_payload = dict(response_data)
+                if request_id is not None and "request_id" not in message_payload:
+                    message_payload["request_id"] = request_id
+                if message_type and "type" not in message_payload:
+                    message_payload["type"] = message_type
+
             message_body = json.dumps(message_payload, ensure_ascii=False)
-            
-            # Create the Service Bus message
             message = ServiceBusMessage(body=message_body)
-            
-            # Set optional properties
+
             if request_id:
                 message.message_id = request_id
-                
-            # Send the message
+
             with self.client.get_queue_sender(queue_name=self.queue_name) as sender:
                 sender.send_messages(message)
-                
-            logger.info(f"Azure result sent successfully to queue '{self.queue_name}'")
+
+            logger.info(f"Message sent successfully to queue '{self.queue_name}'")
             return True
-            
+
         except Exception as e:
-            logger.error(f"Failed to send azure result to queue '{self.queue_name}': {str(e)}")
+            logger.error(f"Failed to send message to queue '{self.queue_name}': {str(e)}")
             return False
 
             

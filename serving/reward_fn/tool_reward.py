@@ -45,7 +45,7 @@ def tool_reward_fn(completions, **kwargs):
                 logger.info(f"<web> tag found in completion {i}")
                 
                 # Extra reward for proper web tag format
-                web_pattern = r"<web>\s*\{\s*\"q\":\s*\"[^\"]+\",\s*\"k\":\s*\d+\s*\}\s*</web>"
+                web_pattern = r"<web>\s*\{\s*\"type\":\s*\"web\",\s*\"q\":\s*\"[^\"]+\",\s*\"k\":\s*\d+\s*\}\s*</web>"
                 if re.search(web_pattern, content):
                     r += 0.2
                     logger.info(f"Proper web tag format found in completion {i}")

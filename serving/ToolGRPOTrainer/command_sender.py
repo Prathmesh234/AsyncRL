@@ -35,17 +35,17 @@ def send_web_command(payload: Dict[str, Any], timeout_s: int = 10) -> str:
     except (TypeError, ValueError):
         k = 3
 
+    payload_type_raw = str(payload.get("type", "web")).strip().lower()
+    payload_type = payload_type_raw or "web"
     request_id = str(uuid4())
-    message = {"q": q, "k": k, "request_id": request_id, "type": "web_command"}
+    message = {"type": payload_type, "q": q, "k": k, "request_id": request_id}
 
     try:
-        # Send request (re-using send_web_result for simplicity)
         with ServiceBusQueueWeb(SERVICE_BUS_CONNECTION_STRING, queue_name=WEB_QUEUE_NAME) as web_queue:
             ok = web_queue.send_web_result(
                 message,
                 request_id=request_id,
-                wrap=False,
-                message_type=message.get("type")
+                wrap=False
             )
             if not ok:
                 return "[web-error] Failed to enqueue web command"

@@ -60,12 +60,21 @@ def format_reward_fn(completions, **kwargs):
                 matches = re.findall(pattern, content)
                 for match in matches:
                     try:
-                        json.loads(match)
-                        r += 0.15  # Good reward for valid JSON
-                        logger.info(f"Valid JSON in {tool_type} tag in completion {i}")
+                        data = json.loads(match)
                     except json.JSONDecodeError:
                         r -= 0.05  # Penalty for invalid JSON
                         logger.warning(f"Invalid JSON in {tool_type} tag in completion {i}")
+                        continue
+
+                    payload_type = str(data.get("type", "")).strip().lower()
+                    if payload_type == tool_type:
+                        r += 0.15  # Good reward for valid JSON with correct type
+                        logger.info(f"Valid JSON in {tool_type} tag in completion {i}")
+                    else:
+                        r -= 0.05  # Penalize missing/mismatched type to reinforce schema
+                        logger.warning(
+                            f"Incorrect or missing type in {tool_type} tag in completion {i}: {payload_type!r}"
+                        )
             
             # 3. Reward for proper workflow structure
             # Check for think -> action -> solution pattern

@@ -13,8 +13,25 @@ from validation import ensure_web_payload, ensure_code_payload, ensure_azure_pay
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+def _int_from_env(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+        if parsed <= 0:
+            raise ValueError
+        return parsed
+    except ValueError:
+        logger.warning("Invalid %s=%r; using default %d", name, value, default)
+        return default
+
 # Load environment variables from .env file
 load_dotenv()
+
+MAX_TOOL_TURNS = _int_from_env("MAX_TOOL_TURNS", 6)
+TURN_MAX_NEW_TOKENS = _int_from_env("TURN_MAX_NEW_TOKENS", 512)
 
 # Tool execution functions
 def run_web_tool(payload: str) -> str:
@@ -79,7 +96,7 @@ client = OpenAI(
 # Service Bus configuration from environment variables
 SERVICE_BUS_CONNECTION_STRING = os.getenv("SERVICE_BUS_CONNECTION_STRING")
 QUEUE_NAME = os.getenv("QUEUE_NAME", "commandqueue")
-task = "Search the web for Azure Cognitive Services sentiment analysis API documentation, provision a Cognitive Services resource in Azure, and write a Python script using SQLAlchemy models to call the API for sentiment scoring on customer feedback data. Include error handling for API failures, logging, and a command-line interface to run inference on new inputs at runtime."
+task = "call the code tool to write and execute a short Python script that lists the top 5 running processes (PID and command) on the system, then summarize the two processes consuming the most CPU time."
 # Get system prompt from environment variable
 system_prompt = os.getenv("SYSTEM_PROMPT", """You are an ORCHESTRATOR/CODING AGENT. Complete real tasks by calling tools and then returning a concise final solution.
 
@@ -94,12 +111,12 @@ ALLOWED TAGS ONLY
 - <solution>...</solution> — final answer for the user.
 Do not use any other tags, formats, or tools.
 
-TOOL PAYLOAD FORMAT (MANDATORY)
-Wrap the JSON payload directly inside the tag (no prose). Use exactly one of:
-- <web>{"q": "search terms", "k": INTEGER} -> q must be a non-empty string; k must be an integer between 1 and 10.
-- <code>{"code_command": "shell command"} -> command must be a non-empty string.
-- <azure>{"azure_command": "az subcommand"} -> command must be a non-empty string.
-Do not add any other keys (including request_id) or change the casing; the runtime supplies queue metadata.
+TOOL PAYLOAD FORMAT (MANDATORY) DO NOT FORGET THE type: ... field for ALL THE TOOL CALLS. 
+Wrap the JSON payload directly inside the tag (no prose). Each object MUST include a `type` discriminator and only the listed keys:
+- <web>{"type": "web", "q": "search terms", "k": INTEGER} -> q must be non-empty; k between 1 and 10.
+- <code>{"type": "code", "code_command": "shell command"} -> command must be non-empty.
+- <azure>{"type": "azure", "azure_command": "az subcommand"} -> command must be non-empty.
+Do not add any other keys (including request_id); the runtime supplies queue metadata.
 
 TURN PROTOCOL (STRICT)
 1) In <think>, decide exactly ONE next action and why.
@@ -122,7 +139,7 @@ DECOUPLING & SAFETY
 COMPLETION RULES
 - Stop when success criteria are met. Output a single <solution>…</solution> that states what was done, provides brief evidence, and omits raw logs.""")
 
-def stream_generate_with_tools(messages, max_turns=6, turn_max_new_tokens=256):
+def stream_generate_with_tools(messages, max_turns=MAX_TOOL_TURNS, turn_max_new_tokens=TURN_MAX_NEW_TOKENS):
     """Generate tokens with streaming and real-time tool execution."""
     print("[GEN] start")
     conversation = ""

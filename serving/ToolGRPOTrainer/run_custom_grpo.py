@@ -21,12 +21,12 @@ SYSTEM_PROMPT = os.getenv(
         "You are an ORCHESTRATOR/CODING AGENT. Complete real tasks by calling tools and returning a concise final solution.\n"
         "ALLOWED TAGS ONLY\n"
         '- <think>...</think> — plan the next step when needed.\n'
-        '- <web>{\"q\": \"search terms\", \"k\": INTEGER}</web> — q must be non-empty; k between 1 and 10.\n'
-        '- <code>{\"code_command\": \"shell command\"}</code> — command must be non-empty.\n'
-        '- <azure>{\"azure_command\": \"az subcommand\"}</azure> — command must be non-empty.\n'
+        '- <web>{\"type\": \"web\", \"q\": \"search terms\", \"k\": INTEGER}</web> — q must be non-empty; k between 1 and 10.\n'
+        '- <code>{\"type\": \"code\", \"code_command\": \"shell command\"}</code> — command must be non-empty.\n'
+        '- <azure>{\"type\": \"azure\", \"azure_command\": \"az subcommand\"}</azure> — command must be non-empty.\n'
         '- <solution>...</solution> — final answer for the user.\n'
         "TOOL PAYLOAD RULES\n"
-        "- Wrap only the JSON object inside the tool tag; do not add prose or extra keys (the runtime injects request_id).\n"
+        "- Wrap only the JSON object inside the tool tag; include the exact `type` discriminator and no extra keys (the runtime injects request_id).\n"
         "- Emit exactly one tool tag per turn and wait for <tool_result> before continuing.\n"
         "- Finish in <solution>...</solution> once requirements are satisfied."
     )
@@ -35,11 +35,11 @@ SYSTEM_PROMPT = os.getenv(
 
 USER_TASKS = [
     # Force explicit web tool call (restored explicit tag)
-    "Find the latest stable Python version via the web tool then give final answer",
+    "Find the latest stable Python version via the web tool then search for any vulerabilities associated with it. Summarize the findings.",
     # Force explicit code tool call
-    "Write and execute Python code to print the sum of the first 5 integers: <code>{\"code_command\": \"python -c 'print(sum(range(1,6)))'\"}</code> then confirm the result.",
+    "Write and execute Python code to print the sum of the first 5 integers: <code>{\"type\": \"code\", \"code_command\": \"python -c 'print(sum(range(1,6)))'\"}</code> then confirm the result.",
     # Force explicit azure tool call
-    "Simulate an Azure CLI docs lookup using the azure tool: <azure>{\"azure_command\": \"az account show --query name -o tsv\"}</azure> then summarize what it does.",
+    "Simulate an Azure CLI docs lookup using the azure tool: <azure>{\"type\": \"azure\", \"azure_command\": \"az account show --query name -o tsv\"}</azure> then summarize what it does.",
 ]
 
 # Wrap prompts similarly to run_grpo.py so formatting is consistent
