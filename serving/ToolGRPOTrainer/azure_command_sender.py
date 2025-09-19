@@ -36,7 +36,12 @@ def send_azure_command(payload: Dict[str, Any], timeout_s: int = 10) -> str:
     try:
         # Send request (re-using send_web_result for simplicity)
         with ServiceBusQueueWeb(SERVICE_BUS_CONNECTION_STRING, queue_name=WEB_QUEUE_NAME) as web_queue:
-            ok = web_queue.send_web_result(message, request_id=request_id)
+            ok = web_queue.send_web_result(
+                message,
+                request_id=request_id,
+                wrap=False,
+                message_type=message.get("type")
+            )
             if not ok:
                 return "[azure-error] Failed to enqueue azure command"
     except Exception as e:

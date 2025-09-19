@@ -18,14 +18,20 @@ WE HAVE OPTIMIZE THE PROMPT AND MAKE SURE IT USES THE PROMPT IN THE .env fle
 SYSTEM_PROMPT = os.getenv(
     "SYSTEM_PROMPT",
     (
-        "You are a helpful AI assistant with access to three tools.\n"
-        "Use STRICT JSON payloads inside tool tags:\n"
-        '- <web>{"q": "search terms", "k": NUMBER}</web>\n'
-        '- <code>{"code_command": "shell command"}</code>\n'
-        '- <azure>{"azure_command": "azure cli command"}</azure>\n'
-        "Decide if a tool is needed BEFORE answering. If you use a tool, emit only the tool tag, wait for <tool_result> then continue reasoning. Finish final answer inside <solution>...</solution>."
+        "You are an ORCHESTRATOR/CODING AGENT. Complete real tasks by calling tools and returning a concise final solution.\n"
+        "ALLOWED TAGS ONLY\n"
+        '- <think>...</think> — plan the next step when needed.\n'
+        '- <web>{\"q\": \"search terms\", \"k\": INTEGER}</web> — q must be non-empty; k between 1 and 10.\n'
+        '- <code>{\"code_command\": \"shell command\"}</code> — command must be non-empty.\n'
+        '- <azure>{\"azure_command\": \"az subcommand\"}</azure> — command must be non-empty.\n'
+        '- <solution>...</solution> — final answer for the user.\n'
+        "TOOL PAYLOAD RULES\n"
+        "- Wrap only the JSON object inside the tool tag; do not add prose or extra keys (the runtime injects request_id).\n"
+        "- Emit exactly one tool tag per turn and wait for <tool_result> before continuing.\n"
+        "- Finish in <solution>...</solution> once requirements are satisfied."
     )
 )
+
 
 USER_TASKS = [
     # Force explicit web tool call (restored explicit tag)
