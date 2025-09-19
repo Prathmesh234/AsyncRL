@@ -4,8 +4,6 @@ from typing import Optional, Dict, Any
 
 from azure.servicebus.aio import ServiceBusClient
 
-from .parser import extract_qk_from_data
-
 
 class CommandQueue:
     """Very small async receiver that pushes messages as they arrive.
@@ -46,14 +44,25 @@ class CommandQueue:
                         )
                         try:
                             raw_text = body_bytes.decode("utf-8", errors="strict")
-                            parsed = json.loads(raw_text)
                         except Exception:
                             raw_text = body_bytes.decode("utf-8", errors="replace")
-                            parsed = raw_text
+
+                        try:
+                            parsed = json.loads(raw_text)
+                        except Exception:
+                            parsed = None
+
+                        # Expect only top-level {q, k}
+                        qk: Optional[Dict[str, Any]] = None
+                        if isinstance(parsed, dict):
+                            q = parsed.get("q")
+                            k = parsed.get("k")
+                            if q is not None or k is not None:
+                                qk = {"q": q, "k": k}
 
                         self.current_command = {
-                            "received_command": parsed,
-                            "data": extract_qk_from_data(parsed),
+                            "received_command": parsed if parsed is not None else raw_text,
+                            "data": qk,
                             "message_id": str(msg.message_id),
                             "raw_content": raw_text,
                             "content_type": "bytes",

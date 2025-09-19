@@ -75,6 +75,115 @@ async def _startup():
     # Prepare reward sender (always enabled)
     app.state.reward_queue = RewardQueue(aio_servicebus_client, REWARD_QUEUE_NAME)
 
+    # Background worker: poll for new queue messages and process via WebTool
+    app.state._processed_ids = set()
+
+    async def _process_loop():
+        while True:
+            try:
+                cmdq = getattr(app.state, "cmd_queue", None)
+                payload = cmdq.current_command if cmdq else None
+                if isinstance(payload, dict):
+                    msg_id = payload.get("message_id")
+                    data = payload.get("data")
+                    if msg_id and msg_id not in app.state._processed_ids and isinstance(data, dict):
+                        q = data.get("q")
+                        k = data.get("k")
+                        if q is not None:
+                            tool: WebTool = getattr(app.state, "web_tool", None) or WebTool()
+                            app.state.web_tool = tool
+                            logger: logging.Logger = getattr(app.state, "logger", logging.getLogger("web_tool"))
+                            kk = int(k) if isinstance(k, (int, float, str)) and str(k).isdigit() else 3
+                            start_msg = f"[web_tool][queue] starting query='{str(q)}' k={kk}"
+                            print(start_msg)
+                            logger.info(start_msg)
+
+                            normalized_results: List[Dict[str, Any]] = []
+                            reward_status = "success"
+                            reward_error: Optional[str] = None
+                            has_result_error = False
+
+                            try:
+                                results = await tool.run(str(q), kk)
+                                if not results:
+                                    reward_status = "no_results"
+                                    nores = f"[web_tool] no results for query='{str(q)}'"
+                                    print(nores)
+                                    logger.info(nores)
+                                for idx, r in enumerate(results or []):
+                                    url = r.get("url", "")
+                                    title = r.get("title", "")
+                                    content = r.get("content", "")
+                                    if r.get("error"):
+                                        has_result_error = True
+                                        msg = f"[web_tool] ERROR url={url} err={r['error']}"
+                                        print(msg)
+                                        logger.info(msg)
+                                        entry: Dict[str, Any] = {
+                                            "rank": idx + 1,
+                                            "url": url,
+                                            "title": title,
+                                            "error": r.get("error"),
+                                        }
+                                    else:
+                                        preview = (content or "")[:300].replace("\n", " ")
+                                        msg = f"[web_tool] url={url}\n  title={title}\n  content={preview}..."
+                                        print(msg)
+                                        logger.info(msg)
+                                        entry = {
+                                            "rank": idx + 1,
+                                            "url": url,
+                                            "title": title,
+                                            "snippet": (content or "").replace("\n", " ")[:20000],
+                                        }
+
+                                    if "score" in r and r["score"] is not None:
+                                        entry["score"] = r["score"]
+                                    if "source" in r and r["source"]:
+                                        entry["source"] = r["source"]
+                                    if "metadata" in r and r["metadata"]:
+                                        entry["metadata"] = r["metadata"]
+
+                                    normalized_results.append(entry)
+
+                                if has_result_error and reward_status == "success":
+                                    reward_status = "partial"
+
+                            except Exception as e:
+                                reward_status = "error"
+                                reward_error = str(e)
+                                msg = f"[web_tool] failed to run: {e}"
+                                print(msg)
+                                logger.exception(msg)
+
+                            reward_payload: Dict[str, Any] = {
+                                "type": "web_tool_results",
+                                "query": str(q),
+                                "k": kk,
+                                "status": reward_status,
+                                "result_count": len(normalized_results),
+                                "results": normalized_results,
+                            }
+                            if reward_error:
+                                reward_payload["error"] = reward_error
+
+                            try:
+                                await app.state.reward_queue.send(reward_payload)
+                            except Exception as exc:
+                                logger.exception(f"[reward_queue] failed to publish results: {exc}")
+
+                            app.state._processed_ids.add(msg_id)
+
+                await asyncio.sleep(0.5)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                # keep the loop alive
+                logging.getLogger("web_tool").exception(f"[worker] error: {e}")
+                await asyncio.sleep(1.0)
+
+    app.state.worker = asyncio.create_task(_process_loop(), name="web-tool-worker")
+
 
 @app.on_event("shutdown")
 async def _shutdown():
@@ -82,6 +191,13 @@ async def _shutdown():
     cmdq = getattr(app.state, "cmd_queue", None)
     if cmdq:
         await cmdq.stop()
+    worker = getattr(app.state, "worker", None)
+    if worker:
+        worker.cancel()
+        try:
+            await worker
+        except asyncio.CancelledError:
+            pass
 
 @app.get("/")
 async def root():
@@ -99,7 +215,7 @@ async def health_check():
 @app.post("/receive-command")
 async def receive_command(command: CommandRequest):
     try:
-        # 1) Send to Service Bus (keep original behavior)
+        # Only enqueue and ack; background worker will process queue messages
         msg_id = str(uuid4())
         payload_dict = command.model_dump(exclude_none=True)
         payload = json.dumps(payload_dict)
@@ -107,135 +223,8 @@ async def receive_command(command: CommandRequest):
         with servicebus_client:
             with servicebus_client.get_queue_sender(COMMAND_QUEUE_NAME) as sender:
                 sender.send_messages(message)
-
-        # 2) Try to extract q,k directly from the posted body
-        q = None
-        k = None
-        # Prefer a top-level `data` shape if present in action/parameters
-        # This keeps compatibility with the CommandQueue parser
-        body_dict = payload_dict
-        # a) Directly in parameters
-        if isinstance(body_dict.get("parameters"), dict):
-            params = body_dict["parameters"]
-            q = params.get("q", q)
-            k = params.get("k", k)
-        # b) Or inside action as free-form dict
-        if q is None and isinstance(body_dict.get("action"), dict):
-            q = body_dict["action"].get("q", q)
-            k = body_dict["action"].get("k", k)
-        # c) Allow direct top-level q/k
-        if q is None and body_dict.get("q") is not None:
-            q = body_dict.get("q")
-        if k is None and body_dict.get("k") is not None:
-            k = body_dict.get("k")
-
-        # 3) If not found, poll the in-memory `/read-command` view briefly
-        #    to leverage the parsed content from CommandQueue
-        if q is None or k is None:
-            # Give the receiver a moment to process the message
-            for _ in range(10):  # ~5s total
-                data_resp = await read_command()
-                try:
-                    data = json.loads(data_resp.body)
-                except Exception:
-                    data = None
-                if isinstance(data, dict):
-                    q = data.get("q", q)
-                    k = data.get("k", k)
-                if q is not None and k is not None:
-                    break
-                await asyncio.sleep(0.5)
-
-        # 4) Run the WebTool if we have a query; send results to reward queue
-        if q:
-            tool: WebTool = getattr(app.state, "web_tool", None) or WebTool()
-            app.state.web_tool = tool
-            logger: logging.Logger = getattr(app.state, "logger", logging.getLogger("web_tool"))
-            kk = int(k) if isinstance(k, (int, float, str)) and str(k).isdigit() else 3
-            start_msg = f"[web_tool] starting query='{str(q)}' k={kk}"
-            print(start_msg)
-            logger.info(start_msg)
-
-            normalized_results: List[Dict[str, Any]] = []
-            reward_status = "success"
-            reward_error: Optional[str] = None
-            has_result_error = False
-
-            try:
-                results = await tool.run(str(q), kk)
-                if not results:
-                    reward_status = "no_results"
-                    nores = f"[web_tool] no results for query='{str(q)}'"
-                    print(nores)
-                    logger.info(nores)
-                for idx, r in enumerate(results or []):
-                    url = r.get("url", "")
-                    title = r.get("title", "")
-                    content = r.get("content", "")
-                    if r.get("error"):
-                        has_result_error = True
-                        msg = f"[web_tool] ERROR url={url} err={r['error']}"
-                        print(msg)
-                        logger.info(msg)
-                        entry: Dict[str, Any] = {
-                            "rank": idx + 1,
-                            "url": url,
-                            "title": title,
-                            "error": r.get("error"),
-                        }
-                    else:
-                        snippet = (content or "")[:200].replace("\n", " ")
-                        msg = f"[web_tool] url={url}\n  title={title}\n  content={snippet}..."
-                        print(msg)
-                        logger.info(msg)
-                        entry = {
-                            "rank": idx + 1,
-                            "url": url,
-                            "title": title,
-                            "snippet": (content or "").replace("\n", " ")[:500],
-                        }
-
-                    if "score" in r and r["score"] is not None:
-                        entry["score"] = r["score"]
-                    if "source" in r and r["source"]:
-                        entry["source"] = r["source"]
-                    if "metadata" in r and r["metadata"]:
-                        entry["metadata"] = r["metadata"]
-
-                    normalized_results.append(entry)
-
-                if has_result_error and reward_status == "success":
-                    reward_status = "partial"
-
-            except Exception as e:
-                reward_status = "error"
-                reward_error = str(e)
-                msg = f"[web_tool] failed to run: {e}"
-                print(msg)
-                logger.exception(msg)
-
-            reward_payload: Dict[str, Any] = {
-                "type": "web_tool_results",
-                "query": str(q),
-                "k": kk,
-                "status": reward_status,
-                "result_count": len(normalized_results),
-                "results": normalized_results,
-            }
-            if reward_error:
-                reward_payload["error"] = reward_error
-
-            query_text = str(q)
-            query_preview = query_text if len(query_text) <= 120 else f"{query_text[:117]}..."
-
-            # Publish to reward queue
-            try:
-                await app.state.reward_queue.send(reward_payload)
-            except Exception as exc:
-                logger.exception(f"[reward_queue] failed to publish results: {exc}")
-
-        # Return a simple success response; results go to reward queue
-        return {"success": True, "message": "Processed and dispatched to reward queue", "message_id": msg_id}
+        # Return a simple success response; background worker will pick it up
+        return {"success": True, "message": "Enqueued; background worker will process", "message_id": msg_id}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
