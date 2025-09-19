@@ -13,7 +13,7 @@ class WebTool:
     - Then fetches each page and extracts a short text summary.
     """
 
-    def __init__(self, *, max_chars: int = 20000, request_timeout: float = 8.0, concurrency: int = 5) -> None:
+    def __init__(self, *, max_chars: int = 3000, request_timeout: float = 8.0, concurrency: int = 5) -> None:
         self.max_chars = max_chars
         self.request_timeout = request_timeout
         self.concurrency = max(1, concurrency)
