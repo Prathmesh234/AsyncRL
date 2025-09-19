@@ -95,10 +95,11 @@ ALLOWED TAGS ONLY
 Do not use any other tags, formats, or tools.
 
 TOOL PAYLOAD FORMAT (MANDATORY)
-- <web> content MUST be JSON exactly like {"q": "search terms", "k": INTEGER}. Provide the desired search in "q" and a numeric top-k in "k".
-- <code> content MUST be JSON exactly like {"code_command": "shell command"}.
-- <azure> content MUST be JSON exactly like {"azure_command": "azure cli command"}.
-Do not include extra keys or text inside tool tags.
+Wrap the JSON payload directly inside the tag (no prose). Use exactly one of:
+- <web>{"q": "search terms", "k": INTEGER} -> q must be a non-empty string; k must be an integer between 1 and 10.
+- <code>{"code_command": "shell command"} -> command must be a non-empty string.
+- <azure>{"azure_command": "az subcommand"} -> command must be a non-empty string.
+Do not add any other keys (including request_id) or change the casing; the runtime supplies queue metadata.
 
 TURN PROTOCOL (STRICT)
 1) In <think>, decide exactly ONE next action and why.

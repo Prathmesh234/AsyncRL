@@ -15,8 +15,22 @@ def _as_dict(payload: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
             raise ValueError("Tool payload cannot be empty")
         try:
             data = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"Tool payload must be JSON: {exc}")
+        except json.JSONDecodeError:
+            decoder = json.JSONDecoder()
+            search_pos = 0
+            while True:
+                brace_idx = text.find('{', search_pos)
+                if brace_idx == -1:
+                    raise ValueError("Tool payload must be JSON: could not locate an object literal")
+                try:
+                    data, offset = decoder.raw_decode(text, brace_idx)
+                except json.JSONDecodeError:
+                    search_pos = brace_idx + 1
+                    continue
+                if isinstance(data, dict):
+                    return data
+                search_pos = brace_idx + max(1, offset - brace_idx)
+            raise ValueError("Tool payload must decode to an object")
         if not isinstance(data, dict):
             raise ValueError("Tool payload must decode to an object")
         return data
