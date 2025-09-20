@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, Dict, Literal, Union
+
 from pydantic import BaseModel, Field, ValidationError
 
 
@@ -48,6 +49,10 @@ class WebCommand(BaseModel):
         type_raw = data.get("type")
         if not isinstance(type_raw, str) or type_raw.strip().lower() != "web":
             raise ValueError('Tool payload must include "type": "web"')
+        allowed_keys = {"type", "q", "k"}
+        extras = set(data.keys()) - allowed_keys
+        if extras:
+            raise ValueError(f"Unexpected fields for web payload: {sorted(extras)}")
         q = str(data.get("q", "")).strip()
         k_raw = data.get("k", default_k)
         try:
@@ -70,6 +75,10 @@ class CodeCommand(BaseModel):
         type_raw = data.get("type")
         if not isinstance(type_raw, str) or type_raw.strip().lower() != "code":
             raise ValueError('Tool payload must include "type": "code"')
+        allowed_keys = {"type", "code_command"}
+        extras = set(data.keys()) - allowed_keys
+        if extras:
+            raise ValueError(f"Unexpected fields for code payload: {sorted(extras)}")
         command = str(data.get("code_command", "")).strip()
         try:
             return cls(type="code", code_command=command)
@@ -87,6 +96,10 @@ class AzureCommand(BaseModel):
         type_raw = data.get("type")
         if not isinstance(type_raw, str) or type_raw.strip().lower() != "azure":
             raise ValueError('Tool payload must include "type": "azure"')
+        allowed_keys = {"type", "azure_command"}
+        extras = set(data.keys()) - allowed_keys
+        if extras:
+            raise ValueError(f"Unexpected fields for azure payload: {sorted(extras)}")
         command = str(data.get("azure_command", "")).strip()
         try:
             return cls(type="azure", azure_command=command)

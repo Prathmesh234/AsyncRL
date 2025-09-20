@@ -16,32 +16,40 @@ The `serving/run_model.py` orchestrator streams model tokens and hands off tool 
 - `run_azure_tool(payload: str) -> str`
 
 For every invocation the raw payload emitted by the model is logged (`[TOOL][type] payload=...`) and parsed by the matching validator in `serving/validation.py`:
-- Web: `ensure_web_payload` → `{ "q": str, "k": int }` with bounds on `k`.
-- Code: `ensure_code_payload` → `{ "code_command": str }`.
-- Azure: `ensure_azure_payload` → `{ "azure_command": str }`.
+- Web: `ensure_web_payload` → `{ "type": "web", "q": str, "k": int }` with bounds on `k`.
+- Code: `ensure_code_payload` → `{ "type": "code", "code_command": str }`.
+- Azure: `ensure_azure_payload` → `{ "type": "azure", "azure_command": str }`.
 
 A malformed payload returns `[type-error] ...` to the model without touching Service Bus.
 
+All validators reject unexpected fields so that every command body matches the strict JSON schemas:
+
+```json
+{ "type": "web", "q": "...", "k": 3 }
+{ "type": "code", "code_command": "..." }
+{ "type": "azure", "azure_command": "..." }
+```
+
 ## Command dispatch flow
 All three helpers delegate to `send_*_command` in `serving/ToolGRPOTrainer/`:
-1. Generate a `request_id = uuid4()` for correlation.
-2. Construct the command envelope and label it with `type`:
-   - Web: `{ "type": "web", "q", "k", "request_id" }`.
-   - Code: `{ "type": "code", "code_command", "request_id" }`.
-   - Azure: `{ "type": "azure", "azure_command", "request_id" }`.
-3. Open a `ServiceBusQueueWeb` context targeting the command queue (`QUEUE_NAME`).
-4. Call `send_web_result(..., wrap=False)` so the Service Bus message body remains the original `{"type", "q", "k", "request_id"}` payload (top-level `type`/`q`/`k` keeps downstream readers simple).
-5. Return early with `[type-error] ...` if connection details are missing, the payload is empty, or the send operation fails.
+1. Construct the command envelope with only the mandatory keys (see schemas above).
+2. Open a `ServiceBusQueueWeb` context targeting the command queue (`QUEUE_NAME`).
+3. Call `send_web_result(..., wrap=False)` so the Service Bus message body remains the strict JSON command payload.
+4. Return early with `[type-error] ...` if connection details are missing, the payload is empty, or the send operation fails.
 
 ## Reward polling
 After enqueueing the command, each sender awaits a response via `_wait_for_response()`:
 - Poll interval: 1 second; maximum duration: `timeout_s` (default 10 seconds in senders, invoked with 15s by `run_model.py`).
 - On each poll, instantiate `ServiceBusQueueWeb` for the reward queue (`REWARD_QUEUE_NAME`) and call `receive_web_reward_async()`.
 - Skip placeholder messages (`"No rewards received"` or `"No messages received"`).
-- Accept the first payload whose `request_id` (or nested `data.request_id`) matches the command. If the executor omits `request_id`, the first non-placeholder message is returned.
-- When the timeout elapses, synthesize `{ "message": "No response within timeout", "request_id": ... }`.
+- Accept the first non-placeholder payload. Queue order combined with the strict schema keeps the pairing unambiguous.
+- When the timeout elapses, synthesize `{ "message": "No response within timeout" }`.
 
 `receive_web_reward_async()` unwraps Service Bus messages into dictionaries and acknowledges each message. Any JSON parsing errors are dead-lettered. The helper returns `{ "data": ..., "message_id": ... }` when available, otherwise a default status message.
+
+## Web executor behavior
+- `CommandQueue` logs `request accepted by web` when a payload has `"type": "web"` and `request rejected by web` for every other message.
+- The background worker in `web-rl-env` ignores rejected commands; only accepted web queries are executed.
 
 ## Returning results to the model
 The sender serializes the reward payload with `json.dumps(...)` and prefixes it with `[type-result]`. For example:

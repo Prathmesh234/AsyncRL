@@ -87,6 +87,13 @@ async def _startup():
                     msg_id = payload.get("message_id")
                     data = payload.get("data")
                     if msg_id and msg_id not in app.state._processed_ids and isinstance(data, dict):
+                        tool_type = payload.get("tool_type") or data.get("type")
+                        if isinstance(tool_type, str):
+                            tool_type = tool_type.strip().lower()
+                        if tool_type != "web":
+                            app.state._processed_ids.add(msg_id)
+                            continue
+
                         q = data.get("q")
                         k = data.get("k")
                         if q is not None:

@@ -1,9 +1,10 @@
 import json
 import logging
 import asyncio
+from typing import Dict, Any, Optional
+
 from azure.servicebus import ServiceBusClient, ServiceBusMessage
 from azure.servicebus.aio import ServiceBusClient as AsyncServiceBusClient
-from typing import Dict, Any, Optional, List
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +35,8 @@ class ServiceBusQueueWeb:
         if self.client:
             self.client.close()
             
-    def send_web_result(self, response_data: Dict[str, Any], 
-                       request_id: Optional[str] = None,
+    def send_web_result(self, response_data: Dict[str, Any],
+                       message_id: Optional[str] = None,
                        *,
                        wrap: bool = True,
                        message_type: Optional[str] = "web_result") -> bool:
@@ -43,7 +44,7 @@ class ServiceBusQueueWeb:
 
         Args:
             response_data: The payload to send (already JSON-serialisable).
-            request_id: Optional request ID for correlation.
+            message_id: Optional AMQP message identifier for correlation/telemetry.
             wrap: When True, embed payload in the legacy `{type:"web_result", data:...}` envelope.
             message_type: Override the outer `type` field for wrapped payloads; ignored if wrap=False
                 unless the payload omits a `type` key (then it is injected).
@@ -57,22 +58,18 @@ class ServiceBusQueueWeb:
                 message_payload: Dict[str, Any] = {
                     "type": message_type or "web_result",
                     "timestamp": None,  # Will be set by Service Bus
-                    "request_id": request_id,
+                    "request_id": message_id,
                     "data": response_data,
                 }
             else:
                 message_payload = dict(response_data)
-                if request_id is not None and "request_id" not in message_payload:
-                    message_payload["request_id"] = request_id
-                if message_type and "type" not in message_payload:
-                    message_payload["type"] = message_type
 
             message_body = json.dumps(message_payload, ensure_ascii=False)
 
             message = ServiceBusMessage(body=message_body)
 
-            if request_id:
-                message.message_id = request_id
+            if message_id:
+                message.message_id = message_id
 
             with self.client.get_queue_sender(queue_name=self.queue_name) as sender:
                 sender.send_messages(message)
