@@ -3,6 +3,7 @@ Parser module for handling different types of content extraction from model outp
 Contains parsers for thinking tags, solution tags, and tool calls.
 """
 
+import json
 import re
 from typing import List, Dict, Any, Tuple
 
@@ -71,19 +72,14 @@ def parse_tool_tags(content: str) -> List[Dict[str, Any]]:
 
 
 def parse_json_from_tool_content(tool_content: str) -> Dict[str, Any]:
-    """Attempt JSON parse; fall back to raw_content."""
-    import json
-    try:
-        return json.loads(tool_content.strip())
-    except json.JSONDecodeError:
-        json_pattern = r'\{.*\}'
-        json_matches = re.findall(json_pattern, tool_content, re.DOTALL)
-        for match in json_matches:
-            try:
-                return json.loads(match.strip())
-            except json.JSONDecodeError:
-                continue
-        return {"raw_content": tool_content.strip()}
+    """Parse a tool payload and require a strict JSON object."""
+    text = tool_content.strip()
+    if not text:
+        raise ValueError("Tool payload cannot be empty")
+    data = json.loads(text)
+    if not isinstance(data, dict):
+        raise ValueError("Tool payload must decode to an object")
+    return data
 
 
 def validate_tool_schema(tool_type: str, tool_data: Dict[str, Any]) -> bool:
@@ -100,6 +96,9 @@ def validate_tool_schema(tool_type: str, tool_data: Dict[str, Any]) -> bool:
         return False
     if tool_data.get("type") != tool_type:
         return False
+    allowed_keys = {"type", *required}
+    if set(tool_data.keys()) != allowed_keys:
+        return False
     return all(key in tool_data for key in required)
 
 
@@ -108,14 +107,27 @@ def parse_and_validate_tools(content: str) -> List[Dict[str, Any]]:
     tool_calls = parse_tool_tags(content)
     validated = []
     for call in tool_calls:
-        parsed = parse_json_from_tool_content(call["content"])
+        try:
+            parsed = parse_json_from_tool_content(call["content"])
+        except ValueError as exc:
+            validated.append({
+                "type": call["type"],
+                "content": call["content"],
+                "parsed_data": None,
+                "is_valid": False,
+                "error": str(exc),
+            })
+            continue
         is_valid = validate_tool_schema(call["type"], parsed)
-        validated.append({
+        entry: Dict[str, Any] = {
             "type": call["type"],
             "content": call["content"],
             "parsed_data": parsed,
             "is_valid": is_valid,
-        })
+        }
+        if not is_valid:
+            entry["error"] = "Invalid tool schema"
+        validated.append(entry)
     return validated
 
 

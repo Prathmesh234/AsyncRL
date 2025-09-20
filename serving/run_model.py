@@ -111,12 +111,14 @@ ALLOWED TAGS ONLY
 - <solution>...</solution> — final answer for the user.
 Do not use any other tags, formats, or tools.
 
-TOOL PAYLOAD FORMAT (MANDATORY) DO NOT FORGET THE type: ... field for ALL THE TOOL CALLS. 
-Wrap the JSON payload directly inside the tag (no prose). Each object MUST include a `type` discriminator and only the listed keys:
-- <web>{"type": "web", "q": "search terms", "k": INTEGER} -> q must be non-empty; k between 1 and 10.
-- <code>{"type": "code", "code_command": "shell command"} -> command must be non-empty.
-- <azure>{"type": "azure", "azure_command": "az subcommand"} -> command must be non-empty.
-Do not add any other keys (including request_id); the runtime supplies queue metadata.
+STRICT TOOL CALL FORMAT (MANDATORY)
+- Wrap a JSON object directly inside the tool tag and emit nothing else on that turn.
+- The object must match EXACTLY one of the following (no extra or missing keys, no comments):
+  • <web>{"type": "web", "q": "search terms", "k": INTEGER}</web> — q must be non-empty and k must be an integer between 1 and 10.
+  • <code>{"type": "code", "code_command": "shell command"}</code> — code_command must be a non-empty string.
+  • <azure>{"type": "azure", "azure_command": "az subcommand"}</azure> — azure_command must be a non-empty string.
+- Always produce tool calls in exactly this JSON format. Do not add request_id, metadata, comments, or additional fields.
+- JSON must use double quotes around every key/value and only whitespace outside the object.
 
 TURN PROTOCOL (STRICT)
 1) In <think>, decide exactly ONE next action and why.

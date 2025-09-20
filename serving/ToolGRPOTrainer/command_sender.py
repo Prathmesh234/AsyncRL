@@ -19,8 +19,8 @@ def send_web_command(payload: Dict[str, Any], timeout_s: int = 10) -> str:
     """Send a web tool command to Service Bus and wait briefly for a response from reward queue.
 
     Flow:
-      1. Enqueue command message to command queue (WEB_QUEUE_NAME)
-      2. Poll reward queue (REWARD_QUEUE_NAME) for matching request_id
+      1. Enqueue a strictly formatted command message to the command queue (WEB_QUEUE_NAME). The AMQP `message_id` is populated for telemetry only.
+      2. Poll the reward queue (REWARD_QUEUE_NAME) for the first non-placeholder response.
       3. Return the JSON response (stringified) or a fallback message.
     """
     if not SERVICE_BUS_CONNECTION_STRING:
@@ -37,14 +37,14 @@ def send_web_command(payload: Dict[str, Any], timeout_s: int = 10) -> str:
 
     payload_type_raw = str(payload.get("type", "web")).strip().lower()
     payload_type = payload_type_raw or "web"
-    request_id = str(uuid4())
-    message = {"type": payload_type, "q": q, "k": k, "request_id": request_id}
+    message_id = str(uuid4())
+    message = {"type": payload_type, "q": q, "k": k}
 
     try:
         with ServiceBusQueueWeb(SERVICE_BUS_CONNECTION_STRING, queue_name=WEB_QUEUE_NAME) as web_queue:
             ok = web_queue.send_web_result(
                 message,
-                request_id=request_id,
+                message_id=message_id,
                 wrap=False
             )
             if not ok:
@@ -60,14 +60,11 @@ def send_web_command(payload: Dict[str, Any], timeout_s: int = 10) -> str:
                 reward_queue = ServiceBusQueueWeb(SERVICE_BUS_CONNECTION_STRING, queue_name=REWARD_QUEUE_NAME)
                 resp = await reward_queue.receive_web_reward_async()
                 if resp and resp.get("message") not in {"No rewards received", "No messages received"}:
-                    # Try to correlate by request_id if present
-                    resp_request_id = resp.get("request_id") or resp.get("data", {}).get("request_id")
-                    if resp_request_id is None or resp_request_id == request_id:
-                        return resp
+                    return resp
             except Exception as e:  # noqa
                 logger.error(f"Error polling reward queue: {e}")
             await asyncio.sleep(1)
-        return {"message": "No response within timeout", "request_id": request_id}
+        return {"message": "No response within timeout"}
 
     try:
         response_obj = asyncio.run(_wait_for_response())
