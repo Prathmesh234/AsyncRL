@@ -24,13 +24,13 @@ class CommandRequest(BaseModel):
 class RewardRequest(BaseModel):
     message: Any
 
-SERVICE_BUS_CONNECTION_STRING = os.environ.get("AZURE_SERVICE_BUS_CONNECTION_STRING")
+SERVICE_BUS_CONNECTION_STRING = os.environ.get("SERVICE_BUS_CONNECTION_STRING")
 if not SERVICE_BUS_CONNECTION_STRING:
-    raise ValueError("AZURE_SERVICE_BUS_CONNECTION_STRING env var required")
+    raise ValueError("SERVICE_BUS_CONNECTION_STRING env var required")
 COMMAND_TOPIC_NAME = os.environ.get("COMMAND_TOPIC_NAME", "commandtopic")
-COMMAND_SUBSCRIPTION_NAME = os.environ.get("COMMAND_SUBSCRIPTION_NAME", "rlcommandbustopic")
+COMMAND_SUBSCRIPTION_NAME = os.environ.get("COMMAND_SUBSCRIPTION_NAME", "azuresubscription")
 REWARD_TOPIC_NAME  = os.environ.get("REWARD_TOPIC_NAME",  "rewardtopic")
-REWARD_SUBSCRIPTION_NAME = os.environ.get("REWARD_SUBSCRIPTION_NAME", "rlcommandbustopic")
+REWARD_SUBSCRIPTION_NAME = os.environ.get("REWARD_SUBSCRIPTION_NAME", "webrewardsubscription")
 
 servicebus_client = ServiceBusClient.from_connection_string(
     conn_str=SERVICE_BUS_CONNECTION_STRING,

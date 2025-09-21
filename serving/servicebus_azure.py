@@ -6,7 +6,8 @@ from azure.servicebus.aio import ServiceBusClient as AsyncServiceBusClient
 from typing import Dict, Any, Optional, List
 
 logger = logging.getLogger(__name__)
-
+##COMMAND_TOPIC_NAME=commandtopic
+#COMMAND_SUBSCRIPTION_NAME=websubscription
 class ServiceBusTopicAzure:
     """
     A utility class for sending and receiving messages to/from Azure Service Bus using a topic + subscription.
@@ -14,7 +15,7 @@ class ServiceBusTopicAzure:
     This replaces the previous queue-based implementation (`ServiceBusQueueAzure`).
     """
     
-    def __init__(self, connection_string: str, topic_name: str = "commandtopic", subscription_name: str = "rlcommandbustopic"):
+    def __init__(self, connection_string: str, topic_name: str = "commandtopic", subscription_name: str = "azuresubscription"):
         """
         Initialize the Service Bus Azure topic sender/receiver.
         

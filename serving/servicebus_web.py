@@ -13,7 +13,7 @@ class ServiceBusTopicWeb:
     A utility class for sending and receiving messages to/from Azure Service Bus topics/subscriptions.
     """
     
-    def __init__(self, connection_string: str, topic_name: str = "commandtopic", subscription_name: str = "consumer1-sub"):
+    def __init__(self, connection_string: str, topic_name: str = "commandtopic", subscription_name: str = "websubscription"):
         """
         Initialize the Service Bus web topic sender/receiver.
         

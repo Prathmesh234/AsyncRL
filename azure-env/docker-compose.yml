@@ -1,0 +1,14 @@
+services:
+  azure-env:
+    build: .
+    image: ${ACR_REGISTRY:-yourregistry}.azurecr.io/azure-env:${IMAGE_TAG:-latest}
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./logger:/app/logger
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - ACR_REGISTRY=${ACR_REGISTRY:-yourregistry}
+      - IMAGE_TAG=${IMAGE_TAG:-latest}

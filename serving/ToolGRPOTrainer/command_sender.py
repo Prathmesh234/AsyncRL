@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 SERVICE_BUS_CONNECTION_STRING = os.getenv("SERVICE_BUS_CONNECTION_STRING")
 WEB_TOPIC_NAME = os.getenv("COMMAND_TOPIC_NAME", "commandtopic")  # topic to send commands
 REWARD_TOPIC_NAME = os.getenv("REWARD_TOPIC_NAME", "rewardtopic")  # topic to receive results
-SUBSCRIPTION_NAME = os.getenv("WEB_SUBSCRIPTION_NAME", "rlcommandbustopic")  # subscription used for receiving
+SUBSCRIPTION_NAME = os.getenv("WEB_SUBSCRIPTION_NAME", "websubscription")  # subscription used for receiving
 
 
 def send_web_command(payload: Dict[str, Any], timeout_s: int = 10) -> str:
