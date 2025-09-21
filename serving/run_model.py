@@ -96,7 +96,7 @@ client = OpenAI(
 # Service Bus configuration from environment variables
 SERVICE_BUS_CONNECTION_STRING = os.getenv("SERVICE_BUS_CONNECTION_STRING")
 QUEUE_NAME = os.getenv("QUEUE_NAME", "commandqueue")
-task = "call the code tool to write and execute a short Python script that lists the top 5 running processes (PID and command) on the system, then summarize the two processes consuming the most CPU time."
+task = "use the azure tool to run az account show and extract the subscription id and tenant id, then list available regions with az account list-locations and summarize how many regions support microsoft.compute"
 # Get system prompt from environment variable
 system_prompt = os.getenv("SYSTEM_PROMPT", """You are an ORCHESTRATOR/CODING AGENT. Complete real tasks by calling tools and then returning a concise final solution.
 

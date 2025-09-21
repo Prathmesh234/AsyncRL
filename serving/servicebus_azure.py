@@ -12,7 +12,7 @@ class ServiceBusQueueAzure:
     A utility class for sending and receiving messages to/from Azure Service Bus azure queue.
     """
     
-    def __init__(self, connection_string: str, queue_name: str = "azurequeue"):
+    def __init__(self, connection_string: str, queue_name: str = "commandqueue"):
         """
         Initialize the Service Bus azure queue sender/receiver.
         

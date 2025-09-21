@@ -74,21 +74,31 @@ class CommandQueue:
                             tool_type_raw = parsed.get("type")
                             if isinstance(tool_type_raw, str):
                                 normalized_type = tool_type_raw.strip().lower()
-                            log_msg = (
-                                "request accepted by web"
-                                if normalized_type == "web"
-                                else "request rejected by web"
-                            )
-                            if self._logger:
-                                self._logger.info(log_msg)
-                            else:
-                                print(log_msg)
                         else:
-                            log_msg = "request rejected by web"
+                            # Non-JSON messages are ignored unless they are web (which they can't be parsed as)
+                            normalized_type = None
+
+                        # IGNORE any non-web tool types early
+                        if normalized_type != "web":
                             if self._logger:
-                                self._logger.info(log_msg)
+                                self._logger.info("Not web command, ignored")
                             else:
-                                print(log_msg)
+                                print("Not web command, ignored")
+                            # Optionally expose last ignored message (without triggering processing loops)
+                            self.current_command = {
+                                "status": "ignored",
+                                "tool_type": normalized_type,
+                                "message_id": str(msg.message_id),
+                                "raw_content": raw_text,
+                            }
+                            await receiver.complete_message(msg)
+                            continue
+
+                        # At this point we have a web command; accept it
+                        if self._logger:
+                            self._logger.info("request accepted by web")
+                        else:
+                            print("request accepted by web")
 
                         self.current_command = {
                             "received_command": parsed if parsed is not None else raw_text,
