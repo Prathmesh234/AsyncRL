@@ -7,15 +7,16 @@ from azure.servicebus.aio import ServiceBusClient
 
 
 class CommandQueue:
-    """Very small async receiver that pushes messages as they arrive.
+    """Very small async receiver that pushes messages as they arrive (topic/subscription based).
 
     Methods: start(), stop(); background loop reads messages and updates
     current_command.
     """
 
-    def __init__(self, client: ServiceBusClient, queue_name: str) -> None:
+    def __init__(self, client: ServiceBusClient, topic_name: str, subscription_name: str) -> None:
         self._client = client
-        self._queue = queue_name
+        self._topic = topic_name
+        self._subscription = subscription_name
         self._task: Optional[asyncio.Task] = None
         self.current_command: Dict[str, Any] = {"status": "idle"}
         self._logger = logging.getLogger("web_tool")
@@ -23,7 +24,7 @@ class CommandQueue:
     async def start(self) -> None:
         if self._task and not self._task.done():
             return
-        self._task = asyncio.create_task(self._run(), name="command-queue-receiver")
+        self._task = asyncio.create_task(self._run(), name="command-subscription-receiver")
 
     async def stop(self) -> None:
         if not self._task:
@@ -36,8 +37,8 @@ class CommandQueue:
 
     async def _run(self) -> None:
         try:
-            # Use long-lived client; create a receiver context that stays open
-            receiver = self._client.get_queue_receiver(queue_name=self._queue)
+            # Use long-lived client; create a subscription receiver context that stays open
+            receiver = self._client.get_subscription_receiver(topic_name=self._topic, subscription_name=self._subscription)
             async with receiver:
                 async for msg in receiver:
                         body_bytes = b"".join(

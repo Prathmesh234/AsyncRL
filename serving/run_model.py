@@ -76,27 +76,14 @@ client = OpenAI(
 
 # Service Bus configuration from environment variables
 SERVICE_BUS_CONNECTION_STRING = os.getenv("SERVICE_BUS_CONNECTION_STRING")
-QUEUE_NAME = os.getenv("QUEUE_NAME", "commandqueue")
-# Load environment variables from .env file
-load_dotenv()
-
-# NOTE: To use the GRPO-trained model, you need to:
-# 1. Stop your current vLLM server
-# 2. Start vLLM server with the GRPO-trained model:
-#    python -m vllm.entrypoints.openai.api_server \
-#    --model /home/ubuntu/GeneratorFS/grpo-qwen-training/checkpoint-100 \
-#    --served-model-name qwen-lora \
-#    --port 8000
 
 client = OpenAI(
     base_url=os.getenv("OPENAI_BASE_URL", "http://localhost:8000/v1"),
     api_key=os.getenv("OPENAI_API_KEY", "token-abc123"),
 )
 
-# Service Bus configuration from environment variables
 SERVICE_BUS_CONNECTION_STRING = os.getenv("SERVICE_BUS_CONNECTION_STRING")
-QUEUE_NAME = os.getenv("QUEUE_NAME", "commandqueue")
-task = "use the azure tool to run az account show and extract the subscription id and tenant id, then list available regions with az account list-locations and summarize how many regions support microsoft.compute"
+task = "use the azure tool to run az account show to get subscription id and tenant id, then run az provider show --namespace Microsoft.Compute --query resourceTypes[?resourceType=='virtualMachines'].locations -o json to count how many regions support virtualMachines, then run az vm list-usage --location eastus -o json and report the two usage metrics closest to their limits. Summarize all findings concisely."
 # Get system prompt from environment variable
 system_prompt = os.getenv("SYSTEM_PROMPT", """You are an ORCHESTRATOR/CODING AGENT. Complete real tasks by calling tools and then returning a concise final solution.
 

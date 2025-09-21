@@ -5,22 +5,23 @@ import logging
 from typing import Any, Dict
 from uuid import uuid4
 from dotenv import load_dotenv
-from servicebus_web import ServiceBusQueueWeb
+from servicebus_web import ServiceBusTopicWeb
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
 SERVICE_BUS_CONNECTION_STRING = os.getenv("SERVICE_BUS_CONNECTION_STRING")
-WEB_QUEUE_NAME = os.getenv("QUEUE_NAME", "commandqueue")  # queue to send commands
-REWARD_QUEUE_NAME = os.getenv("REWARD_QUEUE_NAME", "rewardqueue")  # queue to receive results
+WEB_TOPIC_NAME = os.getenv("COMMAND_TOPIC_NAME", "commandtopic")  # topic to send commands
+REWARD_TOPIC_NAME = os.getenv("REWARD_TOPIC_NAME", "rewardtopic")  # topic to receive results
+SUBSCRIPTION_NAME = os.getenv("WEB_SUBSCRIPTION_NAME", "rlcommandbustopic")  # subscription used for receiving
 
 
 def send_web_command(payload: Dict[str, Any], timeout_s: int = 10) -> str:
-    """Send a web tool command to Service Bus and wait briefly for a response from reward queue.
+    """Send a web tool command to Service Bus (topic) and wait briefly for a response from reward topic.
 
     Flow:
-      1. Enqueue a strictly formatted command message to the command queue (WEB_QUEUE_NAME). The AMQP `message_id` is populated for telemetry only.
-      2. Poll the reward queue (REWARD_QUEUE_NAME) for the first non-placeholder response.
+      1. Publish a strictly formatted command message to the command topic (WEB_TOPIC_NAME). The AMQP `message_id` is populated for telemetry only.
+      2. Poll the reward topic (REWARD_TOPIC_NAME) via its subscription for the first non-placeholder response.
       3. Return the JSON response (stringified) or a fallback message.
     """
     if not SERVICE_BUS_CONNECTION_STRING:
@@ -41,14 +42,14 @@ def send_web_command(payload: Dict[str, Any], timeout_s: int = 10) -> str:
     message = {"type": payload_type, "q": q, "k": k}
 
     try:
-        with ServiceBusQueueWeb(SERVICE_BUS_CONNECTION_STRING, queue_name=WEB_QUEUE_NAME) as web_queue:
-            ok = web_queue.send_web_result(
+        with ServiceBusTopicWeb(SERVICE_BUS_CONNECTION_STRING, topic_name=WEB_TOPIC_NAME, subscription_name=SUBSCRIPTION_NAME) as web_topic:
+            ok = web_topic.send_web_result(
                 message,
                 message_id=message_id,
                 wrap=False
             )
             if not ok:
-                return "[web-error] Failed to enqueue web command"
+                return "[web-error] Failed to publish web command"
     except Exception as e:
         logger.error(f"Failed sending web command: {e}")
         return f"[web-error] {e}"
@@ -57,33 +58,17 @@ def send_web_command(payload: Dict[str, Any], timeout_s: int = 10) -> str:
         # Poll up to timeout_s seconds (1s interval)
         for _ in range(timeout_s):
             try:
-                reward_queue = ServiceBusQueueWeb(SERVICE_BUS_CONNECTION_STRING, queue_name=REWARD_QUEUE_NAME)
-                resp = await reward_queue.receive_web_reward_async()
+                reward_topic = ServiceBusTopicWeb(SERVICE_BUS_CONNECTION_STRING, topic_name=REWARD_TOPIC_NAME, subscription_name=SUBSCRIPTION_NAME)
+                resp = await reward_topic.receive_web_reward_async()
                 if resp and resp.get("message") not in {"No rewards received", "No messages received"}:
                     return resp
             except Exception as e:  # noqa
-                logger.error(f"Error polling reward queue: {e}")
+                logger.error(f"Error polling reward topic: {e}")
             await asyncio.sleep(1)
         return {"message": "No response within timeout"}
 
     try:
         response_obj = asyncio.run(_wait_for_response())
-        # Expected reward queue payload example (response_obj):
-        # {
-        #   "message_id": "4ab73cea-...",
-        #   "q": "Sora api documentation azure",   # original query
-        #   "k": 3,                                 # requested top-k
-        #   "results": [                            # search results list
-        #       {
-        #         "url": "https://...",
-        #         "title": "Quickstart: Generate video with Sora - Azure OpenAI | Microsoft Learn",
-        #         "content": "Long snippet text ..."
-        #       },
-        #       {"url": "https://...", "title": "SORA API on Azure ...", "content": "..."},
-        #       {"url": "https://...", "title": "How to use the Sora API ...", "content": "..."}
-        #   ]
-        # }
-        # We wrap the entire object as the tool result string below.
         return f"[web-result] {json.dumps(response_obj, ensure_ascii=False)}"
     except RuntimeError:
         # If already inside an event loop, create a new one
@@ -91,7 +76,6 @@ def send_web_command(payload: Dict[str, Any], timeout_s: int = 10) -> str:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             response_obj = loop.run_until_complete(_wait_for_response())
-            # Same structure described above for response_obj
             return f"[web-result] {json.dumps(response_obj, ensure_ascii=False)}"
         finally:
             asyncio.set_event_loop(None)

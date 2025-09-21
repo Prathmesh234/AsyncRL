@@ -7,19 +7,15 @@ from azure.servicebus import ServiceBusMessage
 
 
 class RewardQueue:
-    """Minimal async sender for rewards.
+    """Minimal async sender for rewards (topic based)."""
 
-    Structure mirrors CommandQueue: constructed with the async client and
-    queue name; exposes a single async method to send a reward.
-    """
-
-    def __init__(self, client: ServiceBusClient, queue_name: str) -> None:
+    def __init__(self, client: ServiceBusClient, topic_name: str) -> None:
         self._client = client
-        self._queue = queue_name
+        self._topic = topic_name
         self._logger = logging.getLogger("web_tool")
 
     async def send(self, reward: Any) -> None:
-        """Send a reward payload to the queue. Accepts str/dict/bytes.
+        """Send a reward payload to the topic. Accepts str/dict/bytes.
 
         Logs a concise summary (type/query/result_count) rather than payload contents.
         """
@@ -41,20 +37,20 @@ class RewardQueue:
             else:
                 summary = f"text_len={len(payload)}"
 
-        telemetry = f"[reward_queue] sending results to '{self._queue}' {summary}"
+        telemetry = f"[reward_topic] sending results to topic '{self._topic}' {summary}"
         print(telemetry)
         if self._logger:
             self._logger.info(telemetry)
 
-        # Use the long-lived client; do not open/close it here
-        sender = self._client.get_queue_sender(queue_name=self._queue)
+        # Topic sender
+        sender = self._client.get_topic_sender(topic_name=self._topic)
         try:
             async with sender:
                 await sender.send_messages(message)
         except Exception:
             if self._logger:
-                self._logger.exception("[reward_queue] failed to send message")
+                self._logger.exception("[reward_topic] failed to send message")
             raise
         else:
             if self._logger:
-                self._logger.info(f"[reward_queue] delivered to '{self._queue}'")
+                self._logger.info(f"[reward_topic] delivered to topic '{self._topic}'")

@@ -4,7 +4,7 @@ This repository contains multiple RL projects focused on training language model
 
 ## Pretty cool Feature 
 
-By default, GRPOTrainer from huggingface does not enable interleaved tool calling while generating tokens for completitions in GRPO. Had to write custom functions to overwrite it (shoutout to codex for helping me out here - You can find the implementation under ToolGRPOTrainer under serving folder). 
+By default, GRPOTrainer from huggingface does not enable interleaved tool calling while generating tokens for completitions in GRPO. Had to write custom functions to overwrite it (shoutout to codex for helping me out here - You Can find the implementation under ToolGRPOTrainer under serving folder). 
 
 ## 📁 Project Structure
 
@@ -20,7 +20,7 @@ The core project demonstrating how to train a reasoning-focused LLM (Qwen-4B Thi
 - `qwen3-4b-thinking-openthoughts-lora/` - LoRA model checkpoints
 
 ### 2. **Web RL Environment** (New Addition)
-A containerized web-based RL environment API that integrates with Azure Service Bus for command processing.
+A containerized web-based RL environment API that integrates with Azure Service Bus for command processing (now via Topics + Subscriptions).
 
 **Location**: `web-rl-env/` directory
 
@@ -36,11 +36,11 @@ A containerized web-based RL environment API that integrates with Azure Service 
    - Final serving deployed with **SGLang** for low-latency, multi-session inference with async tool handling.
 
 2. **Tool Containers**
-   Each tool is isolated into its own Azure Container Instance (ACI) for safety and modularity. Communication is asynchronous using Azure Storage Queues (one send queue + one receive queue per container).
+   Each tool is isolated into its own Azure Container Instance (ACI) for safety and modularity. Communication is asynchronous using Azure Service Bus **Topics** (one shared command topic with per-tool subscriptions + one reward topic). This replaced the previous storage queue design.
 
-   - **Web Container** – Runs a headless browser (Chromium/Playwright). Used for searching documentation, extracting snippets, and finding APIs.
-   - **Code Container** – Runs Python + Linux utilities inside `/workspace`. Used for competitive coding tasks, script execution, project scaffolding, and test verification.
-   - **Azure Container** – Runs `az` CLI with whitelisted subcommands. Used for infrastructure tasks like spinning up VMs, checking subscription info, or deploying resources.
+   - **Web Container** – Headless browser (Chromium/Playwright) for docs/APIs.
+   - **Code Container** – Python + Linux utilities inside `/workspace`.
+   - **Azure Container** – `az` CLI with whitelisted subcommands.
 
 3. **Reward Mechanisms**
    - Structural rewards: correct usage of `<think>`, `<web>`, `<code>`, `<azure>` tags.
@@ -48,8 +48,8 @@ A containerized web-based RL environment API that integrates with Azure Service 
      - File created/read correctly in Code container.
      - VM spun up or subscription queried successfully in Azure container.
      - Web container retrieved official docs (validated by URL).
-   - Trajectory rewards: a small closed-source reward model checks reasoning chains (`<think>` sections) and validates correctness of tool sequences.
-   - Rewards are aggregated into a single scalar per candidate for GRPO.
+   - Trajectory rewards: a lightweight reward model checks reasoning chains and tool sequencing.
+   - Rewards aggregated to a scalar per candidate for GRPO.
 
 ---
 
@@ -58,10 +58,10 @@ A containerized web-based RL environment API that integrates with Azure Service 
 We use Hugging Face TRL's `GRPOTrainer`:
 
 1. Sample *m* completions per input task (via vLLM backend).
-2. Send candidate tool calls into their respective containers via queues.
-3. Collect results and compute rewards.
-4. Compute group-relative advantages \\(A_i = r_i - \bar r\\).
-5. Update the policy model using REINFORCE with a KL penalty versus a frozen reference (the base Qwen model).
+2. Emit tool commands onto the command topic (publisher) tagged by tool type; executors read via their subscription.
+3. Executors publish results to the reward topic; trainer consumes via its reward subscription.
+4. Compute group-relative advantages (A_i = r_i - r_bar).
+5. Update the policy with KL penalty versus frozen reference.
 
 ### 📝 Example Task
 
@@ -71,21 +71,21 @@ Find the official Microsoft doc that shows how to print the current Azure subscr
 1. `<web>` → locate official CLI doc.
 2. `<code>` → create and read hello.txt.
 3. `<azure>` → run az account show --query name.
-4. Return `<solution>` with results.
-5. Reward = structural correctness + verified outcomes.
+4. Return `<solution>`.
+5. Reward = structural + outcome + trajectory components.
 
 ---
 
 ## 🌐 Web RL Environment
 
-A containerized web API for RL environment management with Azure Service Bus integration.
+A containerized web API for RL environment management with Azure Service Bus (Topics + Subscriptions).
 
 ### Features
-- **Health Check**: `/health` endpoint to check API status
-- **Command Processing**: Receive and process commands via Azure Service Bus
-- **Reward System**: Send rewards back through Service Bus queues
-- **Docker Support**: Fully containerized with Docker Compose
-- **Environment Variables**: Secure configuration management
+- Health `/health`
+- Command processing via a shared command topic
+- Reward publication via a reward topic
+- Docker Compose deployment
+- `.env` driven configuration
 
 ### Quick Start
 
@@ -96,46 +96,48 @@ cd web-rl-env
 # Build and run with Docker Compose
 docker-compose up --build
 
-# API available at http://localhost:8000
+# API at http://localhost:8000
 ```
 
 ### API Endpoints
-- `GET /` - Root endpoint with API information
-- `GET /health` - Health check endpoint
-- `POST /receive-command` - Receive a command from client
-- `POST /send-reward` - Send a reward to Service Bus
-- `GET /read-command` - Read commands from Service Bus queue
+- `GET /` - Root metadata
+- `GET /health` - Health check
+- `POST /receive-command` - Inject a command (publishes to command topic)
+- `POST /send-reward` - Publish a reward message
+- `GET /read-command` - Debug read (subscription pull)
 
 ### Configuration
-Create a `.env` file with your Azure Service Bus connection string:
+Create a `.env` file with your Azure Service Bus connection string and topic settings:
 ```bash
 AZURE_SERVICE_BUS_CONNECTION_STRING=your_connection_string_here
-COMMAND_QUEUE_NAME=commandqueue
-REWARD_QUEUE_NAME=rewardqueue
+COMMAND_TOPIC_NAME=commandtopic
+COMMAND_SUBSCRIPTION_NAME=rlcommandbustopic
+REWARD_TOPIC_NAME=rewardtopic
+REWARD_SUBSCRIPTION_NAME=rlcommandbustopic
 ```
 
 ---
 
 ## 📦 Deployment Notes
 
-- Each container is pre-warmed to avoid long startup delays.
-- Communication is fully decoupled (no mixing tools).
-- Reward models can run on the same GPU as the policy (fastest) or on a separate GPU cluster if open-source reward models are used.
+- Containers are pre-warmed.
+- Topic-based fan-out allows multiple executors to observe commands if desired.
+- Subscriptions enable isolated replay / filtering without touching publishers.
 
 ## ✅ Serving Strategy
 
-- **Training phase**: Use vLLM for candidate generation with parallel decoding (group size > 1) and efficient KV caching.
-- **Deployment phase**: Use SGLang to serve the RL-tuned model with async sessions, low-latency scheduling, and native support for structured outputs.
+- Training: vLLM for parallel candidate generation.
+- Deployment: SGLang for low-latency structured generation.
 
 ## 🔮 Future Work
 
-- Expand tool set (Databases, Git, APIs).
-- Use multi-objective reward aggregation.
-- Introduce curriculum training (start with Hello World → infra orchestration).
-- Enhanced web RL environment with more sophisticated reward mechanisms.
+- Additional tools (DB, Git, REST API agent).
+- Multi-objective reward fusion.
+- Curriculum schedules.
+- Richer reward shaping for web browsing depth.
 
 ---
 
 ## About
 
-This repository contains multiple RL projects focused on training language models to use external tools effectively, with both the main GRPO-based tool use training and a containerized web RL environment for real-time command processing.
+Multiple RL projects for tool-augmented LLMs, now unified on Azure Service Bus Topics + Subscriptions for asynchronous, decoupled execution.

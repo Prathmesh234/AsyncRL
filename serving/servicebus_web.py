@@ -8,21 +8,23 @@ from azure.servicebus.aio import ServiceBusClient as AsyncServiceBusClient
 
 logger = logging.getLogger(__name__)
 
-class ServiceBusQueueWeb:
+class ServiceBusTopicWeb:
     """
-    A utility class for sending and receiving messages to/from Azure Service Bus web queue.
+    A utility class for sending and receiving messages to/from Azure Service Bus topics/subscriptions.
     """
     
-    def __init__(self, connection_string: str, queue_name: str = "commandqueue"):
+    def __init__(self, connection_string: str, topic_name: str = "commandtopic", subscription_name: str = "consumer1-sub"):
         """
-        Initialize the Service Bus web queue sender/receiver.
+        Initialize the Service Bus web topic sender/receiver.
         
         Args:
             connection_string (str): Azure Service Bus connection string
-            queue_name (str): Name of the queue to send/receive messages to/from
+            topic_name (str): Name of the topic to send/receive messages to/from
+            subscription_name (str): Name of the subscription used when receiving
         """
         self.connection_string = connection_string
-        self.queue_name = queue_name
+        self.topic_name = topic_name
+        self.subscription_name = subscription_name
         self.client = None
         
     def __enter__(self):
@@ -40,7 +42,7 @@ class ServiceBusQueueWeb:
                        *,
                        wrap: bool = True,
                        message_type: Optional[str] = "web_result") -> bool:
-        """Send payload to the Service Bus queue.
+        """Send payload to the Service Bus topic.
 
         Args:
             response_data: The payload to send (already JSON-serialisable).
@@ -71,20 +73,21 @@ class ServiceBusQueueWeb:
             if message_id:
                 message.message_id = message_id
 
-            with self.client.get_queue_sender(queue_name=self.queue_name) as sender:
+            # Topic sender now
+            with self.client.get_topic_sender(topic_name=self.topic_name) as sender:
                 sender.send_messages(message)
 
-            logger.info(f"Message sent successfully to queue '{self.queue_name}'")
+            logger.info(f"Message sent successfully to topic '{self.topic_name}'")
             return True
 
         except Exception as e:
-            logger.error(f"Failed to send message to queue '{self.queue_name}': {str(e)}")
+            logger.error(f"Failed to send message to topic '{self.topic_name}': {str(e)}")
             return False
 
             
     async def receive_messages_async(self, max_message_count: int = 1, max_wait_time: int = 5) -> Dict[str, Any]:
         """
-        Receive messages from the Service Bus web queue (asynchronous) - simplified like read_command.
+        Receive messages from the Service Bus subscription (asynchronous) - simplified like read_command.
         
         Args:
             max_message_count (int): Maximum number of messages to receive
@@ -95,7 +98,7 @@ class ServiceBusQueueWeb:
         """
         try:
             async with AsyncServiceBusClient.from_connection_string(self.connection_string) as client:
-                async with client.get_queue_receiver(queue_name=self.queue_name) as receiver:
+                async with client.get_subscription_receiver(topic_name=self.topic_name, subscription_name=self.subscription_name) as receiver:
                     received_msgs = await receiver.receive_messages(
                         max_message_count=max_message_count, 
                         max_wait_time=max_wait_time
@@ -108,7 +111,7 @@ class ServiceBusQueueWeb:
                             
                             # Complete the message
                             await receiver.complete_message(msg)
-                            logger.info(f"Message received and completed from web queue '{self.queue_name}'")
+                            logger.info(f"Message received and completed from subscription '{self.subscription_name}' on topic '{self.topic_name}'")
                             
                             # Return just the data object when available; otherwise return payload as-is
                             payload = {
@@ -123,11 +126,11 @@ class ServiceBusQueueWeb:
                                 return payload
                             
                         except json.JSONDecodeError as e:
-                            logger.error(f"Failed to parse message from web queue: {str(e)}")
+                            logger.error(f"Failed to parse message from subscription: {str(e)}")
                             await receiver.dead_letter_message(msg)
                             
         except Exception as e:
-            logger.error(f"Failed to receive messages from web queue '{self.queue_name}': {str(e)}")
+            logger.error(f"Failed to receive messages from subscription '{self.subscription_name}' on topic '{self.topic_name}': {str(e)}")
             
         # Return default message if no messages received or error occurred
         return {"message": "No messages received"}
@@ -141,7 +144,7 @@ class ServiceBusQueueWeb:
         """
         try:
             async with AsyncServiceBusClient.from_connection_string(self.connection_string) as client:
-                async with client.get_queue_receiver(queue_name=self.queue_name) as receiver:
+                async with client.get_subscription_receiver(topic_name=self.topic_name, subscription_name=self.subscription_name) as receiver:
                     received_msgs = await receiver.receive_messages(
                         max_message_count=1, 
                         max_wait_time=5
@@ -154,7 +157,7 @@ class ServiceBusQueueWeb:
                             
                             # Complete the message
                             await receiver.complete_message(msg)
-                            logger.info(f"Web reward received from queue '{self.queue_name}'")
+                            logger.info(f"Web reward received from subscription '{self.subscription_name}' on topic '{self.topic_name}'")
                             
                             # Create payload like read_command
                             payload = {
@@ -174,7 +177,7 @@ class ServiceBusQueueWeb:
                             await receiver.dead_letter_message(msg)
                             
         except Exception as e:
-            logger.error(f"Failed to receive web rewards: {str(e)}")
+            logger.error(f"Failed to receive web rewards from subscription '{self.subscription_name}' on topic '{self.topic_name}': {str(e)}")
             
         # Return default message like read_command does
         return {"message": "No rewards received"}

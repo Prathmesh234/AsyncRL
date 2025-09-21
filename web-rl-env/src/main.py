@@ -36,8 +36,11 @@ class RewardRequest(BaseModel):
 SERVICE_BUS_CONNECTION_STRING = os.environ.get("AZURE_SERVICE_BUS_CONNECTION_STRING")
 if not SERVICE_BUS_CONNECTION_STRING:
     raise ValueError("AZURE_SERVICE_BUS_CONNECTION_STRING environment variable is required")
-COMMAND_QUEUE_NAME = os.environ.get("COMMAND_QUEUE_NAME", "commandqueue")
-REWARD_QUEUE_NAME  = os.environ.get("REWARD_QUEUE_NAME",  "rewardqueue")
+# Topic + subscription names
+COMMAND_TOPIC_NAME = os.environ.get("COMMAND_TOPIC_NAME", "commandtopic")
+COMMAND_SUBSCRIPTION_NAME = os.environ.get("COMMAND_SUBSCRIPTION_NAME", "rlcommandbustopic")
+REWARD_TOPIC_NAME  = os.environ.get("REWARD_TOPIC_NAME",  "rewardtopic")
+REWARD_SUBSCRIPTION_NAME = os.environ.get("REWARD_SUBSCRIPTION_NAME", "rlcommandbustopic")
 
 # ✅ Use AMQP over WebSockets (works behind firewalls/NAT; port 443)
 servicebus_client = ServiceBusClient.from_connection_string(
@@ -69,13 +72,13 @@ async def _startup():
 
     app.state.logger = _setup_logger()
 
-    # Start background async receiver (push-style)
-    app.state.cmd_queue = CommandQueue(aio_servicebus_client, COMMAND_QUEUE_NAME)
+    # Start background async subscription receiver (push-style)
+    app.state.cmd_queue = CommandQueue(aio_servicebus_client, COMMAND_TOPIC_NAME, COMMAND_SUBSCRIPTION_NAME)
     await app.state.cmd_queue.start()
-    # Prepare reward sender (always enabled)
-    app.state.reward_queue = RewardQueue(aio_servicebus_client, REWARD_QUEUE_NAME)
+    # Prepare reward sender (topic based)
+    app.state.reward_queue = RewardQueue(aio_servicebus_client, REWARD_TOPIC_NAME)
 
-    # Background worker: poll for new queue messages and process via WebTool
+    # Background worker: process new subscription messages and act via WebTool
     app.state._processed_ids = set()
 
     async def _process_loop():
@@ -101,7 +104,7 @@ async def _startup():
                             app.state.web_tool = tool
                             logger: logging.Logger = getattr(app.state, "logger", logging.getLogger("web_tool"))
                             kk = int(k) if isinstance(k, (int, float, str)) and str(k).isdigit() else 3
-                            start_msg = f"[web_tool][queue] starting query='{str(q)}' k={kk}"
+                            start_msg = f"[web_tool][topic] starting query='{str(q)}' k={kk}"
                             print(start_msg)
                             logger.info(start_msg)
 
@@ -177,7 +180,7 @@ async def _startup():
                             try:
                                 await app.state.reward_queue.send(reward_payload)
                             except Exception as exc:
-                                logger.exception(f"[reward_queue] failed to publish results: {exc}")
+                                logger.exception(f"[reward_topic] failed to publish results: {exc}")
 
                             app.state._processed_ids.add(msg_id)
 
@@ -222,13 +225,13 @@ async def health_check():
 @app.post("/receive-command")
 async def receive_command(command: CommandRequest):
     try:
-        # Only enqueue and ack; background worker will process queue messages
+        # Only enqueue and ack; background worker will process topic messages
         msg_id = str(uuid4())
         payload_dict = command.model_dump(exclude_none=True)
         payload = json.dumps(payload_dict)
         message = ServiceBusMessage(payload, message_id=msg_id)
         with servicebus_client:
-            with servicebus_client.get_queue_sender(COMMAND_QUEUE_NAME) as sender:
+            with servicebus_client.get_topic_sender(COMMAND_TOPIC_NAME) as sender:
                 sender.send_messages(message)
         # Return a simple success response; background worker will pick it up
         return {"success": True, "message": "Enqueued; background worker will process", "message_id": msg_id}
@@ -245,7 +248,7 @@ async def send_reward(reward: RewardRequest):
             # Fallback to sync client if async sender is unavailable
             payload = reward.message if isinstance(reward.message, str) else json.dumps(reward.message)
             with servicebus_client:
-                with servicebus_client.get_queue_sender(REWARD_QUEUE_NAME) as sender:
+                with servicebus_client.get_topic_sender(REWARD_TOPIC_NAME) as sender:
                     sender.send_messages(ServiceBusMessage(payload))
         return {"success": True, "message": "Reward sent to Service Bus"}
     except Exception as e:

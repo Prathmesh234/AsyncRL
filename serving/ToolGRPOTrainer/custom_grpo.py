@@ -32,7 +32,7 @@ warnings.filterwarnings("ignore", message=".*Caching is incompatible with gradie
 # -------------------------------
 # Tool functions
 # When <web>...</web> is produced in a streaming chunk, we call send_web_command,
-# which enqueues to commandqueue and polls rewardqueue for the correlated result.
+# which publishes to commandtopic and polls rewardtopic (via subscription) for the correlated result.
 # The returned JSON is wrapped into <tool_result> so model can continue.
 # -------------------------------
 
@@ -71,7 +71,7 @@ class ToolCallingGRPOTrainer(GRPOTrainer):
     Flow per completion:
       * Stream tokens
       * Detect tool tag via stream_parser
-      * Execute corresponding run_*_tool (web -> waits for rewardqueue)
+      * Execute corresponding run_*_tool (web -> waits for rewardtopic)
       * Append <tool_result>...</tool_result> to conversation
       * Continue generation until <solution> or repetition guard triggers
     """
@@ -128,7 +128,7 @@ class ToolCallingGRPOTrainer(GRPOTrainer):
                     tool_type = tool_call.get("type")
                     content = tool_call.get("content")
                     if tool_type == "web":
-                        # This will block until rewardqueue response (or timeout)
+                        # This will block until rewardtopic response (or timeout)
                         result = run_web_tool(content)
                     elif tool_type == "code":
                         result = run_code_tool(content)
