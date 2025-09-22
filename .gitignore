@@ -1,2 +1,9 @@
 # Local environment secrets
 azure-env/.env
+
+# OS-generated files
+.DS_Store
+.Trash-1000
+
+# Notebook artifacts
+.ipynb_checkpoints/
