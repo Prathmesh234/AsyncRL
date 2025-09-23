@@ -1,0 +1,35 @@
+# Code tool environment Dockerfile
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# Install system dependencies (no Azure CLI required here)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates bash jq git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv for dependency management
+RUN pip install --no-cache-dir uv
+
+WORKDIR /app
+
+COPY pyproject.toml ./
+# (No lock file yet; using sync without --frozen)
+RUN uv sync --no-dev
+
+COPY src/ ./src/
+COPY code_env/ ./code_env/
+COPY scripts/ ./scripts/
+
+RUN mkdir -p /app/projects \
+    && useradd --create-home --shell /bin/bash app \
+    && chown -R app:app /app
+USER app
+
+EXPOSE 8001
+
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8001/health || exit 1
+
+CMD ["/app/scripts/start.sh"]

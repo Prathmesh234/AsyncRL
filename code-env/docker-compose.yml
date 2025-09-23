@@ -1,0 +1,16 @@
+services:
+  code-env:
+    build: .
+    image: ${ACR_REGISTRY:-yourregistry}.azurecr.io/code-env:${IMAGE_TAG:-latest}
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./logger:/app/logger
+      - ./projects:/app/projects
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - ACR_REGISTRY=${ACR_REGISTRY:-yourregistry}
+      - IMAGE_TAG=${IMAGE_TAG:-latest}
+      - CODE_WORKSPACE_DIR=${CODE_WORKSPACE_DIR:-/app/projects}
