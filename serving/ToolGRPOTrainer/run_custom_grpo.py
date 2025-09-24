@@ -8,6 +8,8 @@ from reward_fn.tool_reward import tool_reward_fn
 
 print("[PRINT] run_custom_grpo.py importing & preparing dataset")
 
+WANDB_DISABLED_VALUES = {"1", "true", "yes"}
+
 # System prompt (match style of run_grpo.py) with explicit tool instructions
 
 '''
@@ -48,6 +50,20 @@ dataset = Dataset.from_list([
     {"prompt": f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n<|im_start|>user\n{t}<|im_end|>\n<|im_start|>assistant\n"} for t in USER_TASKS
 ])
 
+wandb_enabled = os.getenv("WANDB_DISABLED", "").strip().lower() not in WANDB_DISABLED_VALUES
+report_to = "wandb" if wandb_enabled else None
+
+if wandb_enabled and not os.getenv("WANDB_PROJECT"):
+    default_project = "tool-grpo"
+    os.environ.setdefault("WANDB_PROJECT", default_project)
+    print(f"[PRINT] WANDB_PROJECT not set; defaulting to {default_project}")
+
+if wandb_enabled:
+    project_name = os.getenv("WANDB_PROJECT")
+    print(f"[PRINT] WANDB logging enabled -> project={project_name}")
+else:
+    print("[PRINT] WANDB logging disabled via WANDB_DISABLED env flag.")
+
 print(f"[PRINT] Dataset size={len(dataset)} example_prompt=\n{dataset[0]['prompt'][:300]!r}")
 
 training_args = GRPOConfig(
@@ -59,6 +75,11 @@ training_args = GRPOConfig(
     learning_rate=5e-6,
     gradient_checkpointing=True,
     bf16=True,
+    report_to=report_to,
+    log_completions=wandb_enabled,
+    wandb_log_unique_prompts=wandb_enabled,
+    num_completions_to_print=4 if wandb_enabled else 0,
+    run_name=os.getenv("WANDB_RUN_NAME") if wandb_enabled else None,
 )
 print("[PRINT] Training args ready")
 

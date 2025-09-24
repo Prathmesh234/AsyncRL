@@ -13,6 +13,20 @@ import logging, warnings
 from transformers.utils import logging as hf_logging
 # Replace relative import with absolute to support script execution
 try:
+    import wandb
+except ImportError:
+    wandb = None
+
+
+def _log_tool_usage(tool_name: str) -> None:
+    if wandb is None or getattr(wandb, "run", None) is None:
+        return
+    try:
+        wandb.log({f"tools/{tool_name}_calls": 1}, commit=False)
+    except Exception:
+        pass
+
+try:
     from command_sender import send_web_command
     from azure_command_sender import send_azure_command
     from code_command_sender import send_code_command
@@ -43,7 +57,9 @@ def run_web_tool(payload: str) -> str:
         web = ensure_web_payload(payload, default_k=3)  # => {"q": str, "k": int}
     except Exception as exc:
         return f"[web-error] {exc}"
-    return send_web_command(web, timeout_s=15)
+    result = send_web_command(web, timeout_s=15)
+    _log_tool_usage("web")
+    return result
 
 def run_code_tool(payload: str) -> str:
     print(f"[TOOL][code] payload={payload!r}")
@@ -51,7 +67,9 @@ def run_code_tool(payload: str) -> str:
         code_payload = ensure_code_payload(payload)
     except Exception as exc:
         return f"[code-error] {exc}"
-    return send_code_command(code_payload, timeout_s=15)
+    result = send_code_command(code_payload, timeout_s=15)
+    _log_tool_usage("code")
+    return result
 
 def run_azure_tool(payload: str) -> str:
     print(f"[TOOL][azure] payload={payload!r}")
@@ -59,7 +77,9 @@ def run_azure_tool(payload: str) -> str:
         azure_payload = ensure_azure_payload(payload)
     except Exception as exc:
         return f"[azure-error] {exc}"
-    return send_azure_command(azure_payload, timeout_s=15)
+    result = send_azure_command(azure_payload, timeout_s=15)
+    _log_tool_usage("azure")
+    return result
 
 # -------------------------------
 # Custom Trainer with streaming rollouts

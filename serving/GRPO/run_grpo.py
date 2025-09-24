@@ -25,6 +25,8 @@ load_dotenv("../.env")
 SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "You are a helpful AI assistant.")
 
 
+WANDB_DISABLED_VALUES = {"1", "true", "yes"}
+
 
 def main():
     USER_TASKS = [
@@ -75,6 +77,19 @@ def main():
     ])
     logger.info(f"Loaded {len(dataset)} prompts into Dataset")
 
+    wandb_enabled = os.getenv("WANDB_DISABLED", "").strip().lower() not in WANDB_DISABLED_VALUES
+    report_to = "wandb" if wandb_enabled else None
+
+    if wandb_enabled and not os.getenv("WANDB_PROJECT"):
+        default_project = "grpo-training"
+        os.environ.setdefault("WANDB_PROJECT", default_project)
+        logger.info("WANDB_PROJECT not set; defaulting to '%s'", default_project)
+
+    if wandb_enabled:
+        logger.info("Weights & Biases logging enabled; reporting to '%s'", os.getenv("WANDB_PROJECT"))
+    else:
+        logger.info("Weights & Biases logging disabled via WANDB_DISABLED env flag.")
+
     training_args = GRPOConfig(
         output_dir="/home/ubuntu/GeneratorFS/grpo-qwen-training",
         use_vllm=True,
@@ -85,7 +100,12 @@ def main():
         per_device_train_batch_size=2,
         logging_steps=5,
         learning_rate=5e-6,
-        save_steps=50
+        save_steps=50,
+        report_to=report_to,
+        log_completions=wandb_enabled,
+        wandb_log_unique_prompts=wandb_enabled,
+        num_completions_to_print=4 if wandb_enabled else 0,
+        run_name=os.getenv("WANDB_RUN_NAME") if wandb_enabled else None,
     )
 
     logger.info("Initializing GRPO Trainer with multiple reward functions...")
