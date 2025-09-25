@@ -14,7 +14,7 @@ SERVICE_BUS_CONNECTION_STRING = os.getenv("SERVICE_BUS_CONNECTION_STRING")
 WEB_TOPIC_NAME = os.getenv("COMMAND_TOPIC_NAME", "commandtopic")  # topic to send commands
 REWARD_TOPIC_NAME = os.getenv("REWARD_TOPIC_NAME", "rewardtopic")  # topic to receive results
 SUBSCRIPTION_NAME = os.getenv("WEB_SUBSCRIPTION_NAME", "rlcommandbustopic")  # command subscription (if distinct)
-REWARD_SUBSCRIPTION_NAME = os.getenv("REWARD_SUBSCRIPTION_NAME")
+REWARD_SUBSCRIPTION_NAME = os.getenv("REWARD_SUBSCRIPTION_NAME") or SUBSCRIPTION_NAME
 
 
 def send_web_command(payload: Dict[str, Any], timeout_s: int = 10) -> str:
