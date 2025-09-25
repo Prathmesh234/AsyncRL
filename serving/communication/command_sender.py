@@ -13,8 +13,8 @@ logger = logging.getLogger(__name__)
 SERVICE_BUS_CONNECTION_STRING = os.getenv("SERVICE_BUS_CONNECTION_STRING")
 WEB_TOPIC_NAME = os.getenv("COMMAND_TOPIC_NAME", "commandtopic")  # topic to send commands
 REWARD_TOPIC_NAME = os.getenv("REWARD_TOPIC_NAME", "rewardtopic")  # topic to receive results
-SUBSCRIPTION_NAME = os.getenv("WEB_SUBSCRIPTION_NAME", "websubscription")  # subscription used for sending commands (if needed)
-REWARD_SUBSCRIPTION_NAME = os.getenv("REWARD_SUBSCRIPTION_NAME") or SUBSCRIPTION_NAME  # allow separate subscription for rewards
+SUBSCRIPTION_NAME = os.getenv("WEB_SUBSCRIPTION_NAME", "rlcommandbustopic")  # command subscription (if distinct)
+REWARD_SUBSCRIPTION_NAME = os.getenv("REWARD_SUBSCRIPTION_NAME")
 
 
 def send_web_command(payload: Dict[str, Any], timeout_s: int = 10) -> str:
@@ -56,12 +56,12 @@ def send_web_command(payload: Dict[str, Any], timeout_s: int = 10) -> str:
         return f"[web-error] {e}"
 
     async def _wait_for_response():
-        # Reuse a single topic helper for polling instead of recreating every loop
         reward_topic = ServiceBusTopic(
             SERVICE_BUS_CONNECTION_STRING,
             topic_name=REWARD_TOPIC_NAME,
             subscription_name=REWARD_SUBSCRIPTION_NAME,
         )
+        # Poll up to timeout_s seconds (1s interval)
         for _ in range(timeout_s):
             try:
                 resp = await reward_topic.receive_web_reward_async()

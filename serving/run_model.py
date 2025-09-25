@@ -4,9 +4,9 @@ from dotenv import load_dotenv
 import json
 import logging
 from parser import stream_parser
-from ToolGRPOTrainer.command_sender import send_web_command
-from ToolGRPOTrainer.azure_command_sender import send_azure_command
-from ToolGRPOTrainer.code_command_sender import send_code_command
+from communication.command_sender import send_web_command
+from communication.azure_command_sender import send_azure_command
+from communication.code_command_sender import send_code_command
 from validation import ensure_web_payload, ensure_code_payload, ensure_azure_payload
 
 # Configure logging

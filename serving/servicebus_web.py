@@ -8,7 +8,7 @@ from azure.servicebus.aio import ServiceBusClient as AsyncServiceBusClient
 
 logger = logging.getLogger(__name__)
 
-class ServiceBusTopicWeb:
+class ServiceBusTopic:
     """
     A utility class for sending and receiving messages to/from Azure Service Bus topics/subscriptions.
     """

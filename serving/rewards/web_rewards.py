@@ -5,7 +5,7 @@ import os
 from dotenv import load_dotenv
 import sys
 sys.path.append('..')
-from servicebus_web import ServiceBusTopicWeb
+from servicebus_web import ServiceBusTopic
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -24,10 +24,10 @@ async def check_rewards():
         return
 
     topic_name = os.getenv("REWARD_TOPIC_NAME", "rewardtopic")
-    subscription_name = os.getenv("REWARD_SUBSCRIPTION_NAME", "rlcommandbustopic")
+    subscription_name = os.getenv("REWARD_SUBSCRIPTION_NAME", os.getenv("WEB_SUBSCRIPTION_NAME", "websubscription"))
 
     # Create topic helper
-    web_topic = ServiceBusTopicWeb(connection_string, topic_name=topic_name, subscription_name=subscription_name)
+    web_topic = ServiceBusTopic(connection_string, topic_name=topic_name, subscription_name=subscription_name)
 
     logger.info(f"Polling reward topic '{topic_name}' subscription '{subscription_name}' every 5s...")
 
