@@ -42,7 +42,12 @@ def create_batch_jsonl(
                 "body": {
                     "model": model,
                     "messages": [
-                        {"role": "user", "content": user_prompt},
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": user_prompt},
+                            ],
+                        },
                     ],
                 },
             }
