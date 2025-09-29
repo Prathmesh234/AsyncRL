@@ -38,9 +38,46 @@ A containerized web-based RL environment API that integrates with Azure Service 
 2. **Tool Containers**
    Each tool is isolated into its own Azure Container Instance (ACI) for safety and modularity. Communication is asynchronous using Azure Service Bus **Topics** (one shared command topic with per-tool subscriptions + one reward topic). This replaced the previous storage queue design.
 
-   - **Web Container** – Headless browser (Chromium/Playwright) for docs/APIs.
-   - **Code Container** – Python + Linux utilities inside `/workspace`.
-   - **Azure Container** – `az` CLI with whitelisted subcommands.
+   - **Web Container** – Headless Chromium (Playwright) session used to open documentation portals, navigate API references, and capture authoritative URLs that can be surfaced back to the policy.
+   - **Code Container** – Lightweight Python + Linux environment rooted at `/workspace` for file manipulation, shell commands, and running evaluation scripts required by the tasks.
+   - **Azure Container** – Hardened `az` CLI image with whitelisted subscription, VM, and resource group subcommands for cloud-administration workflows.
+
+### 🚢 Running the Containers Locally
+
+Each container can be brought up independently for debugging, or together for end-to-end evaluation. All images expect a `.env` file that provides the Azure Service Bus connection information used for command/reward fan-out.
+
+1. **Shared Prerequisites**
+   ```bash
+   # From repository root
+   cp serving/.env.example serving/.env  # Fill in Service Bus credentials
+   az servicebus topic create ...        # Ensure topics/subscriptions exist
+   ```
+
+2. **Web Container**
+   ```bash
+   cd serving/web-container
+   docker build -t asyncrl-web .
+   docker run --env-file ../.env -p 3000:3000 asyncrl-web
+   ```
+   Exposes a FastAPI service that proxies navigation commands to Playwright and reports back rendered content and URLs.
+
+3. **Code Container**
+   ```bash
+   cd serving/code-container
+   docker build -t asyncrl-code .
+   docker run --env-file ../.env -v $(pwd)/../../:/workspace asyncrl-code
+   ```
+   Mounts the repo into `/workspace` so the agent can edit files and execute scripts safely within the sandbox.
+
+4. **Azure Container**
+   ```bash
+   cd serving/azure-container
+   docker build -t asyncrl-azure .
+   docker run --env-file ../.env asyncrl-azure
+   ```
+   Provides authenticated `az` CLI access with the minimal permission set required by the tasks.
+
+When deployed in Azure Container Instances, the same images subscribe to the shared command topic and stream results back on the reward topic.
 
 3. **Reward Mechanisms**
    - Structural rewards: correct usage of `<think>`, `<web>`, `<code>`, `<azure>` tags.
@@ -75,6 +112,35 @@ Find the official Microsoft doc that shows how to print the current Azure subscr
 5. Reward = structural + outcome + trajectory components.
 
 ---
+
+## 🧪 Dataset Generation & Imitation Learning Setup
+
+Before launching GRPO, we bootstrap the policy via supervised fine-tuning (SFT) on synthetic tool-use demonstrations. Tool proficiency is currently the primary bottleneck for the base policy, so we crafted trajectories that explicitly show:
+
+- How to call each tool container with the correct XML tags.
+- What configuration blocks and payload formats look like for command dispatch.
+- How to stitch tool outputs back into structured `<solution>` responses.
+
+### Synthetic Trajectories via OpenAI Batch API
+
+We generated trajectories using the OpenAI Batch API so that multiple prompts could be processed asynchronously. Roughly 40 % of the jobs were cut short because we hit the quota limits mid-run. Among the completed jobs we filtered out demonstrations that were too short or had formatting glitches, keeping only long-form, clean dialogues suitable for imitation learning. The curated dataset now contains clear tool invocations with full request/response structure.
+
+### Curriculum Design
+
+To avoid overwhelming the small policy, we adopted a curriculum with three rungs:
+
+- **Easy** – Single-tool problems (e.g., basic file I/O or a single documentation lookup).
+- **Easy-Medium** – Multi-step flows that combine two tools but with generous guidance.
+- **Medium** – Realistic support-style tickets requiring sequencing across all three containers.
+
+We intentionally skipped hard trajectories because the current model capacity is insufficient; they lead to exploration collapse. Medium-hard scenarios are being designed as the next stage once stability improves.
+
+### Imitation Learning + GRPO
+
+1. **SFT Warm Start** – Fine-tune on the curated trajectories so the policy learns the syntax of tool tags, the expected observation formats, and general operating procedures.
+2. **GRPO Fine-Tuning** – Switch to reinforcement learning where the policy interacts with the live containers. GRPO encourages adherence to the response schema while optimizing for successful task completion.
+
+This combination teaches basic tool competence via imitation and then refines performance with RL-driven rewards.
 
 ## 🌐 Web RL Environment
 
