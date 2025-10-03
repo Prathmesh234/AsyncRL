@@ -211,8 +211,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Supervised fine-tuning for Qwen.")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--data-dir", default=DEFAULT_DATA_DIR)
-    parser.add_argument("--output-dir", default="synthetic-qwen-lora")
+
+    # Default output to the existing LoRA directory to update in place
     default_lora_dir = _default_lora_dir()
+    default_output = str(default_lora_dir) if default_lora_dir else "synthetic-qwen-lora"
+
+    parser.add_argument("--output-dir", default=default_output)
     parser.add_argument(
         "--lora-weights",
         default=str(default_lora_dir) if default_lora_dir else None,
@@ -265,13 +269,17 @@ def main() -> None:
     if lora_dir and lora_dir.exists():
         load_initial_lora_weights(trainer.model, lora_dir)
 
+    print(f"\nStarting training... Will save to: {args.output_dir}")
     trainer.train()
     trainer.save_model(args.output_dir)
     tokenizer.save_pretrained(args.output_dir)
 
     save_system_prompt(Path(args.output_dir), system_prompt)
 
-    print(f"Training complete. Artifacts stored in {args.output_dir}")
+    print(f"\n{'='*60}")
+    print(f"✅ Training complete!")
+    print(f"📁 LoRA adapters updated in: {args.output_dir}")
+    print(f"{'='*60}")
 
 
 if __name__ == "__main__":
