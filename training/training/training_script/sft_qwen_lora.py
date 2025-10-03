@@ -132,7 +132,7 @@ def build_bnb_config(enabled: bool) -> Optional[BitsAndBytesConfig]:
         load_in_4bit=True,
         bnb_4bit_use_double_quant=True,
         bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_compute_dtype=torch.bfloat16 if torch.cuda.is_available() else None,
     )
 
 
@@ -160,27 +160,25 @@ def build_sft_config(
 ):
     return SFTConfig(
         output_dir=output_dir,
-        num_train_epochs=epochs,
+        dataset_text_field="text",
+        max_length=max_seq_length,
+        packing=False,
         per_device_train_batch_size=batch_size,
-        gradient_accumulation_steps=grad_accum,
+        num_train_epochs=epochs,
         learning_rate=learning_rate,
-        max_seq_length=max_seq_length,
+        bf16=False,  # Use fp16 compute in 4-bit mode like notebook
+        gradient_checkpointing=True,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
         logging_steps=10,
         save_strategy="epoch",
         eval_strategy="epoch" if eval_dataset is not None else "no",
         report_to="none",
-        bf16=use_cuda,
-        fp16=not use_cuda,
-        dataset_text_field="text",
-        train_on_source=False,
-        response_template=RESPONSE_TEMPLATE,
-        packing=False,
-        dataset_kwargs={"append_concat_token": False},
         model_init_kwargs={
-            "torch_dtype": torch.bfloat16 if use_cuda else torch.float32,
+            "torch_dtype": torch.float16,
             "trust_remote_code": True,
-            "device_map": "auto" if use_cuda else None,
             "quantization_config": bnb_config,
+            "device_map": "auto",
+            "low_cpu_mem_usage": True
         },
     )
 
@@ -222,7 +220,7 @@ def main() -> None:
         default=str(default_lora_dir) if default_lora_dir else None,
         help="Optional path to existing LoRA adapter weights to initialize from.",
     )
-    parser.add_argument("--epochs", type=float, default=1.0)
+    parser.add_argument("--epochs", type=float, default=2.0)
     parser.add_argument("--max-seq-length", type=int, default=2048)
     parser.add_argument("--learning-rate", type=float, default=2e-4)
     parser.add_argument("--batch-size", type=int, default=1)
@@ -230,13 +228,37 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
+    # Hard-coded overrides (per user request)
+    repo_root = Path(__file__).resolve().parents[3]
+    args.model = "Qwen/Qwen3-4B-Thinking-2507"
+    # Build absolute dataset path from repo root so CWD does not matter
+    hard_data_path = repo_root / "training" / "synthetic_trajectories" / "synthetic_traj_gpt"
+    args.data_dir = str(hard_data_path)
+    args.output_dir = "qwen3-4b-thinking-openthoughts-lora"
+    args.lora_weights = args.output_dir  # reuse same dir for updating existing LoRA
+
+    # Fallback: auto-detect a directory with jsonl files if the hard-coded one is empty
+    hard_data = Path(args.data_dir)
+    if (not hard_data.exists()) or (not list(hard_data.glob('*.jsonl'))):
+        root_scan = repo_root / "training" / "synthetic_trajectories"
+        jsonl_candidates = list(root_scan.rglob('*.jsonl')) if root_scan.exists() else []
+        if jsonl_candidates:
+            detected = jsonl_candidates[0].parent
+            print(f"[AutoDetect] Overriding data_dir to {detected} (found JSONL)")
+            args.data_dir = str(detected)
+        else:
+            print(f"[Warning] No JSONL found under {root_scan}.")
+
+    print(f"Using hard-coded settings:\n  Model: {args.model}\n  Data dir: {args.data_dir}\n  Output/LoRA dir: {args.output_dir}\n  Epochs: {args.epochs}")
+
+    print(f"Training for {args.epochs} epoch(s)")
+
     torch.manual_seed(args.seed)
 
     data_dir = Path(args.data_dir)
     dataset, system_prompt = load_trajectories(data_dir)
     train_dataset, eval_dataset = maybe_split(dataset, seed=args.seed)
 
-    tokenizer = build_tokenizer(args.model)
     use_cuda = torch.cuda.is_available()
     bnb_config = build_bnb_config(use_cuda)
 
@@ -255,13 +277,13 @@ def main() -> None:
 
     trainer = SFTTrainer(
         model=args.model,
-        tokenizer=tokenizer,
+        args=sft_config,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         peft_config=peft_config,
-        args=sft_config,
     )
 
+    # Disable KV cache for training to save memory
     if hasattr(trainer.model, "config"):
         trainer.model.config.use_cache = False
 
@@ -272,6 +294,9 @@ def main() -> None:
     print(f"\nStarting training... Will save to: {args.output_dir}")
     trainer.train()
     trainer.save_model(args.output_dir)
+    
+    # Save tokenizer separately 
+    tokenizer = build_tokenizer(args.model)
     tokenizer.save_pretrained(args.output_dir)
 
     save_system_prompt(Path(args.output_dir), system_prompt)

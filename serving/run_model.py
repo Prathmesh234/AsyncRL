@@ -36,27 +36,33 @@ TURN_MAX_NEW_TOKENS = _int_from_env("TURN_MAX_NEW_TOKENS", 512)
 # Tool execution functions
 def run_web_tool(payload: str) -> str:
     print(f"[TOOL][web] payload={payload!r}")
-    try:
-        web_payload = ensure_web_payload(payload)
-    except Exception as exc:
-        return f"[web-error] {exc}"
-    return send_web_command(web_payload, timeout_s=15)
+    # For testing: return dummy response
+    return "[web-result] Mock web search results for testing"
+    # try:
+    #     web_payload = ensure_web_payload(payload)
+    # except Exception as exc:
+    #     return f"[web-error] {exc}"
+    # return send_web_command(web_payload, timeout_s=15)
 
 def run_code_tool(payload: str) -> str:
     print(f"[TOOL][code] payload={payload!r}")
-    try:
-        code_payload = ensure_code_payload(payload)
-    except Exception as exc:
-        return f"[code-error] {exc}"
-    return send_code_command(code_payload, timeout_s=15)
+    # For testing: return dummy response
+    return "[code-result] Mock code execution output for testing"
+    # try:
+    #     code_payload = ensure_code_payload(payload)
+    # except Exception as exc:
+    #     return f"[code-error] {exc}"
+    # return send_code_command(code_payload, timeout_s=15)
 
 def run_azure_tool(payload: str) -> str:
     print(f"[TOOL][azure] payload={payload!r}")
-    try:
-        azure_payload = ensure_azure_payload(payload)
-    except Exception as exc:
-        return f"[azure-error] {exc}"
-    return send_azure_command(azure_payload, timeout_s=15)
+    # For testing: return dummy response
+    return "[azure-result] Mock Azure CLI output for testing"
+    # try:
+    #     azure_payload = ensure_azure_payload(payload)
+    # except Exception as exc:
+    #     return f"[azure-error] {exc}"
+    # return send_azure_command(azure_payload, timeout_s=15)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -83,7 +89,7 @@ client = OpenAI(
 )
 
 SERVICE_BUS_CONNECTION_STRING = os.getenv("SERVICE_BUS_CONNECTION_STRING")
-task = "use the azure tool to run az account show to get subscription id and tenant id, then run az provider show --namespace Microsoft.Compute --query resourceTypes[?resourceType=='virtualMachines'].locations -o json to count how many regions support virtualMachines, then run az vm list-usage --location eastus -o json and report the two usage metrics closest to their limits. Summarize all findings concisely."
+task = "Find the recommended Python version for running TensorFlow 2.15. Then write and execute a Python script to check which Python version is currently installed on the system. Based on the installed version, search for any known compatibility issues. Finally, check which Azure VM sizes in East US support GPU acceleration for machine learning workloads."
 # Get system prompt from environment variable
 system_prompt = os.getenv("SYSTEM_PROMPT", """You are an ORCHESTRATOR/CODING AGENT. Complete real tasks by calling tools and then returning a concise final solution.
 

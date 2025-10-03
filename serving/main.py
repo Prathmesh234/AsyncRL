@@ -3,10 +3,10 @@ import sys
 import os
 
 def main():
-    print("Starting vLLM server for GRPO-trained Qwen model...")
+    print("Starting vLLM server for LoRA-trained Qwen model...")
     
-    # Path to your GRPO-trained LoRA model
-    lora_path = "/home/ubuntu/GeneratorFS/grpo-qwen-training/checkpoint-100"
+    # Path to your LoRA model (use absolute path)
+    lora_path = "/home/ubuntu/GeneratorFS/training/training/training_script/qwen3-4b-thinking-openthoughts-lora"
     
     # vLLM serve command
     cmd = [

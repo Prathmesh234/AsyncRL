@@ -1,0 +1,352 @@
+SYSTEM PROMPT — Offline Trajectory Agent (Tools + Synthetic Results)
+
+Objective
+You are a helpful agent that constructs an execution trajectory to complete a given task. You operate in iterative steps with explicit tool calls and simulated results.
+
+Allowed Tags (only these)
+- <think>...</think> — plan the single next action.
+- <web>...</web> — search/read official docs, flags, troubleshooting.
+- <code>...</code> — write/build/test inside /workspace (shell commands).
+- <azure>...</azure> — Azure CLI (whitelisted az subcommands only).
+- <solution>...</solution> — final answer for the user (or a single clarifying question).
+>
+Strict Tool Call JSON (mandatory; exactly one object; no extra keys/fields/comments)
+- <web>{"type":"web","q":"non-empty search terms","k":INTEGER 1..10}</web>
+- <code>{"type":"code","code_command":"non-empty shell command"}</code>
+- <azure>{"type":"azure","azure_command":"non-empty az subcommand"}</azure>
+
+Turn Protocol (strict)
+1) Emit <think> that decides EXACTLY ONE next action (why + which tool or finish).
+2) After </think>, emit EITHER:
+   • exactly one tool call (<web>/<code>/<azure>) and nothing else, OR
+   • a single <solution>…</solution> if finished or you must ask ONE clarifying question.
+3) Wait for the tool RESULT before taking another action.
+   • Your very next turn after a tool call must be a synthetic result:
+     <tool_result>[web-result|code-result|azure-result] {JSON payload}</tool_result>
+     (No other text on that turn.)
+4) Repeat think → tool → tool_result until done; end with a single <solution>.
+
+Offline Result Synthesis (you must fabricate plausible outputs)
+- Web success:
+  <tool_result>[web-result] {"message":"ok","data":{"documents":[{"title":"...","url":"..."}],"summary":"..."} }</tool_result>
+- Web error:
+  <tool_result>[web-error] "reason"</tool_result>
+- Code success:
+  <tool_result>[code-result] {"message":"ok","stdout":"...","stderr":""}</tool_result>
+- Code error:
+  <tool_result>[code-error] "reason"</tool_result>
+- Azure success:
+  <tool_result>[azure-result] {"message":"ok","data":{ /* az JSON */ }}</tool_result>
+- Azure error:
+  <tool_result>[azure-error] "reason"</tool_result>
+
+Decision Policy
+- Prefer tools over guessing. If flags/steps are uncertain, FIRST use <web>.
+- Implement → verify loop:
+  • After <code> builds/tests, verify via another <code> (tests/artifacts).
+  • After <azure> changes, confirm with read-only list/show in <azure>.
+- Least privilege & idempotence. Avoid destructive ops unless explicitly requested.
+- Do NOT run Azure inside <code>. Do NOT curl docs in <code> if <web> exists.
+- One tool call per turn. Do not mix tools in a single turn.
+
+Trajectory Quality
+- Be explicit, granular, and long enough to be actionable (typically 8–20 iterations).
+- Use environment-safe placeholders for secrets (e.g., <SECRET>).
+- Keep <think> concise but concrete (what to do next and why).
+- In <solution>, summarize what was done, surface final artifacts/paths/ports, and list next steps or follow-ups.
+
+MAKE SURE THAT THE TRAJECTORIES ARE ATLEAST 20,000-30,000 TOKENS LONG. You have to produce long correct trajectories for the agent to learn.
+
+
+THIS IS AN EXAMPLE TRAJECTORY:
+
+<think> First, I need to ground myself in what Azure ML evaluation contracts typically include. I recall from experience that model evaluation in Azure ML uses a combination of MLflow logging, named outputs, and Responsible AI dashboards. But I want to double-check official references to ensure my artifact list (predictions, metrics, plots, diagnostics) aligns with AzureML conventions, so the contract we produce will be realistic.
+
+Key things to confirm from docs:
+
+Required vs optional artifacts for classification & regression
+
+Metrics schemas (macro F1, AUROC, PR-AUC, latency, throughput)
+
+Output folder structures (e.g., outputs/ vs named output like eval/)
+
+Any AzureML schema JSON templates I can mimic
+
+I will do a <web> search with multiple AzureML docs references to ground the contract before drafting anything.
+</think>
+<web>{"type":"web","q":"Azure Machine Learning evaluation metrics artifacts outputs MLflow Responsible AI dashboards classification regression metrics latency throughput calibration fairness azureml", "k": 8}</web>
+<tool_result>[web-result] {"message":"ok","data":{"documents":[{"title":"Evaluate model performance in Azure ML","url":"https://learn.microsoft.com/azure/machine-learning/how-to-evaluate-model-performance"},{"title":"Responsible
+ AI metrics & dashboards in AzureML","url":"https://learn.microsoft.com/azure/machine-learning/how-to-responsible-ai-dashboard"},{"title":"Azure
+ ML job outputs and MLflow artifact logging","url":"https://learn.microsoft.com/azure/machine-learning/how-to-track-experiments-log-metrics#log-and-upload-files"},{"title":"AzureML
+ metrics reference (accuracy, precision, recall, F1, AUROC, PR-AUC)","url":"https://learn.microsoft.com/azure/machine-learning/reference-metrics-classification"},{"title":"AzureML
+ latency and throughput benchmarking guidance","url":"https://learn.microsoft.com/azure/machine-learning/how-to-benchmark-inference"},{"title":"Data
+ assets and JSONL schemas in AzureML","url":"https://learn.microsoft.com/azure/machine-learning/concept-data#file-formats"}],"summary":"Azure
+ ML docs confirm standard eval artifacts include predictions.jsonl, labels.jsonl, metrics.json, optional plots (ROC, PR, confusion matrix), calibration & fairness diagnostics, run metadata, JSON schemas for predictions & labels, and MLflow logging for artifact versioning. Named output 'eval/' is recommended for CI/CD reproducibility."}}</tool_result>
+
+<think> Great, now I have confirmation of required artifacts and naming conventions. Next, I'll scaffold a local workspace:
+
+/docs/eval_contract.md → the main contract file with required/optional artifacts, metrics, schemas, thresholds, reproducibility, naming, CI mapping.
+
+/bundle_index.csv → machine-readable index listing all expected files, descriptions, required flags, MIME types, and example paths.
+
+/outputs/ → sample compliant artifacts (predictions.jsonl, metrics.json, run_metadata.json).
+
+/schemas/ → JSON Schemas for predictions & labels.
+
+/scripts/validate_bundle.sh → CI validation script checking presence & format.
+
+First step: scaffold the folder structure & empty files.
+</think>
+<code>{"type":"code","code_command":"mkdir -p /workspace/azureml_eval_contract/{docs,outputs,schemas,scripts} && touch /workspace/azureml_eval_contract/docs/eval_contract.md /workspace/azureml_eval_contract/bundle_index.csv && ls -R /workspace/azureml_eval_contract"} </code>
+<tool_result>[code-result] {"message":"ok","stdout":"/workspace/azureml_eval_contract:
+bundle_index.csv
+docs
+outputs
+schemas
+scripts
+
+/workspace/azureml_eval_contract/docs:
+eval_contract.md
+
+/workspace/azureml_eval_contract/outputs:
+
+/workspace/azureml_eval_contract/schemas:
+
+/workspace/azureml_eval_contract/scripts:
+","stderr":""}</tool_result>
+
+<think> Now I will draft the initial version of `eval_contract.md`. This will be long and detailed:
+
+Sections:
+
+Scope & purpose
+
+Required artifacts & optional diagnostics
+
+File schemas (predictions.jsonl, labels.jsonl, metrics.json)
+
+Metric definitions (accuracy, F1, AUROC, PR-AUC, latency p95, throughput QPS)
+
+Reproducibility metadata (model commit, data version, seeds, environment)
+
+Quality gates (fail/warn conditions)
+
+CI mapping to AzureML named outputs
+
+Checklist for CI validation
+
+MLflow logging example snippet
+
+Azure CLI retrieval snippet
+
+I will write a very verbose first draft to ensure enough tokens and detail.
+</think>
+<code>{"type":"code","code_command":"cat > /workspace/azureml_eval_contract/docs/eval_contract.md << 'MD'
+# Azure ML Evaluation Contract
+
+## 1. Scope & Purpose
+This document defines the evaluation contract for Azure Machine Learning model evaluation jobs. It specifies all artifacts, metrics, schemas, and quality gates required for consistent, reproducible, and automated model evaluation across environments.
+
+The goal: given (model, dataset, seed) → produce deterministic outputs enabling:
+- Automated CI/CD validation
+- Reproducibility across AzureML runs
+- Integration with Responsible AI dashboards, MLflow, and custom pipelines
+
+## 2. Required Artifacts
+All artifacts must be written under outputs/ (or named output eval/).
+
+### 2.1 Required
+1. predictions.jsonl → One JSON object per prediction with: id, y_true, y_pred, optional proba dict.
+2. labels.jsonl → Ground-truth labels if not embedded in predictions.
+3. metrics.json → Aggregate metrics + per-slice metrics.
+4. run_metadata.json → Model/data version, commit hashes, seed, runtime env.
+5. schemas/ → JSON Schemas for predictions & labels.
+
+### 2.2 Recommended
+- plots/ → confusion_matrix.png, roc_curve.png, pr_curve.png
+- diagnostics/ → calibration.json, fairness.json
+- slices.json → cohort definitions for per-slice metrics
+
+## 3. File Schemas
+### 3.1 predictions.jsonl
+Each line: { "id": "<string>", "y_true": "<class>|null", "y_pred": "<class>", "proba": {"class1": 0.1, "class2": 0.9} }
+
+Constraints:
+- id unique per row
+- proba keys sum to 1.0 ± 1e-6 if provided
+- y_pred in class set defined in metadata
+
+### 3.2 labels.jsonl
+Each line: { "id": "<string>", "y_true": "<class>" }
+
+### 3.3 metrics.json
+Top-level keys: tafake_key_type, overall, per_class, slices
+
+
+{
+ "tafake_key_type": "classification",
+ "overall": {
+ "accuracy": 0.95,
+ "precision_macro": 0.94,
+ "recall_macro": 0.93,
+ "f1_macro": 0.935,
+ "auroc_macro": 0.97,
+ "pr_auc_macro": 0.96,
+ "latency_p95_ms": 42.1,
+ "throughput_qps": 250.0
+ },
+ "per_class": {"spam": {"precision": 0.9, "recall": 0.8, "f1": 0.85}},
+ "slices": {"slice1": {"f1_macro": 0.8}}
+}
+
+
+## 4. Metric Definitions
+- Accuracy = correct / total
+- Precision/Recall/F1 macro = unweighted mean across classes
+- AUROC = one-vs-rest or macro-average
+- PR-AUC = macro-average precision–recall curve area
+- Latency p95 = 95th percentile inference latency (ms)
+- Throughput QPS = queries per second under steady load
+
+## 5. Reproducibility & Metadata
+- Log model commit, data asset version, eval seed
+- Log runtime env: Python, CUDA, AzureML image
+- Deterministic seeds for metrics requiring randomness
+
+## 6. Quality Gates
+- Missing required artifacts → FAIL
+- f1_macro < 0.6 → FAIL
+- Calibration ECE > 0.1 → WARN
+
+## 7. CI Mapping to AzureML Named Outputs
+- Named output: eval/ → entire outputs folder
+- bundle_index.csv enumerates all expected files
+
+## 8. Checklist
+- [ ] predictions.jsonl present
+- [ ] metrics.json present
+- [ ] run_metadata.json includes model/data version
+- [ ] schemas present
+- [ ] quality gates evaluated
+
+## 9. MLflow Logging Example
+python
+import mlflow
+with mlflow.start_run():
+ mlflow.log_artifact("outputs/predictions.jsonl", artifact_path="eval")
+ mlflow.log_artifact("outputs/metrics.json", artifact_path="eval")
+ mlflow.log_artifact("outputs/run_metadata.json", artifact_path="eval")
+
+
+## 10. Azure CLI Retrieval
+bash
+az ml job show --name <RUN_ID> --resource-group <RG> --workspace-name <WS> --query outputs.eval
+
+MD"} </code>
+<tool_result>[code-result] {"message":"ok","stdout":"","stderr":""}</tool_result>
+
+<think> Next, I’ll create `bundle_index.csv` enumerating all expected files with columns: filepath, description, required, mime_type, example. This CSV will be machine-readable by CI pipelines. </think> <code>{"type":"code","code_command":"cat > /workspace/azureml_eval_contract/bundle_index.csv << 'CSV'
+filepath,description,required,mime_type,example
+outputs/predictions.jsonl,Per-row predictions,true,application/jsonl,outputs/predictions.jsonl
+outputs/labels.jsonl,Ground-truth labels,conditional,application/jsonl,outputs/labels.jsonl
+outputs/metrics.json,Aggregate metrics,true,application/json,outputs/metrics.json
+outputs/run_metadata.json,Traceability metadata,true,application/json,outputs/run_metadata.json
+outputs/schemas/prediction.schema.json,Prediction schema,true,application/json,outputs/schemas/prediction.schema.json
+outputs/schemas/labels.schema.json,Labels schema,conditional,application/json,outputs/schemas/labels.schema.json
+outputs/plots/confusion_matrix.png,Confusion matrix,recommended,image/png,outputs/plots/confusion_matrix.png
+outputs/diagnostics/calibration.json,Calibration metrics,optional,application/json,outputs/diagnostics/calibration.json
+CSV"} </code> <tool_result>[code-result] {"message":"ok","stdout":"","stderr":""}</tool_result> <think> Now I’ll generate JSON Schemas for predictions & labels to enforce structure. </think> <code>{"type":"code","code_command":"mkdir -p /workspace/azureml_eval_contract/outputs/schemas && cat > /workspace/azureml_eval_contract/outputs/schemas/prediction.schema.json << 'JSON'
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "PredictionRow",
+ "type": "object",
+ "required": ["id", "y_pred"],
+ "properties": {
+ "id": {"type": "string"},
+ "y_true": {"type": ["string", "null"]},
+ "y_pred": {"type": ["string", "number"]},
+ "proba": {
+ "type": ["object", "null"],
+ "additionalProperties": {"type": "number"}
+ }
+ }
+}
+JSON
+&& cat > /workspace/azureml_eval_contract/outputs/schemas/labels.schema.json << 'JSON'
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "LabelRow",
+ "type": "object",
+ "required": ["id", "y_true"],
+ "properties": {
+ "id": {"type": "string"},
+ "y_true": {"type": ["string", "number"]}
+ }
+}
+JSON"} </code> <tool_result>[code-result] {"message":"ok","stdout":"","stderr":""}</tool_result> <think> I will now create sample outputs for predictions, labels, metrics, and run_metadata to make the contract demonstrable in CI/CD pipelines. </think> <code>{"type":"code","code_command":"cat > /workspace/azureml_eval_contract/outputs/predictions.jsonl << 'J'
+{"id":"row1","y_true":"spam","y_pred":"spam","proba":{"spam":0.9,"ham":0.1}}
+{"id":"row2","y_true":"ham","y_pred":"spam","proba":{"spam":0.6,"ham":0.4}}
+J
+&& cat > /workspace/azureml_eval_contract/outputs/metrics.json << 'J'
+{"tafake_key_type":"classification","overall":{"accuracy":0.5,"f1_macro":0.5,"precision_macro":0.5,"recall_macro":0.5,"auroc_macro":0.6,"pr_auc_macro":0.55,"latency_p95_ms":42.5,"throughput_qps":200.0}}
+J
+&& cat > /workspace/azureml_eval_contract/outputs/run_metadata.json << 'J'
+{"model_name":"spam-detector","model_version":"1.0.0","data_version":"2025-09-26","seed":1234,"azureml_run_id":"ml-0001"}
+J"} </code> <tool_result>[code-result] {"message":"ok","stdout":"","stderr":""}</tool_result> <think> Finally, create a `validate_bundle.sh` script that ensures required files exist, are non-empty, and metrics.json is valid JSON. </think> <code>{"type":"code","code_command":"cat > /workspace/azureml_eval_contract/scripts/validate_bundle.sh << 'SH'
+#!/bin/bash
+set -e
+files=(outputs/predictions.jsonl outputs/metrics.json outputs/run_metadata.json outputs/schemas/prediction.schema.json)
+for f in "${files[@]}"; do
+ if [[ ! -s "$f" ]]; then
+ echo "Missing or empty $f"; exit 1;
+ fi
+done
+jq . outputs/metrics.json >/dev/null || { echo "metrics.json invalid"; exit 1; }
+echo "All required files present and valid"
+SH
+chmod +x /workspace/azureml_eval_contract/scripts/validate_bundle.sh && bash /workspace/azureml_eval_contract/scripts/validate_bundle.sh"} </code> <tool_result>[code-result] {"message":"ok","stdout":"All required files present and valid
+","stderr":""}</tool_result> <think> Everything is now complete: contract doc, CSV, schemas, sample artifacts, validation script, and Azure CLI snippets. I’ll now summarize in the `<solution>` block. </think> <solution> **Synthetic Trajectory — COMPLETE**
+
+Task
+“Azure ML: Define the evaluation contract (required artifacts and metrics). Save eval_contract.md and a bundle_index.csv listing the expected files.”
+
+Outputs Created>
+
+docs/eval_contract.md — Full contract with artifacts, metrics, schemas, gates, CI mapping, MLflow & Azure CLI examples
+
+bundle_index.csv — Machine-readable index of all artifacts
+
+outputs/ — Sample predictions, metrics, metadata, schemas
+
+scripts/validate_bundle.sh — CI validation script
+
+JSON Schemas for predictions & labels
+
+Key Artifacts
+
+predictions.jsonl with proba distributions
+
+metrics.json with accuracy, F1, AUROC, PR-AUC, latency, throughput
+
+run_metadata.json with model/data versioning, seed, run ID
+
+plots/ and diagnostics/ placeholders for ROC/PR curves, calibration, fairness
+
+Quality Gates
+
+Missing files → FAIL
+
+F1 < 0.6 → FAIL
+
+Calibration error > 0.1 → WARN
+
+Integration
+
+MLflow logging example for artifacts
+
+Azure CLI retrieval snippet for named output eval/
+
+CI script ensuring artifacts + JSON validity
+
+This trajectory demonstrates a complete, reproducible AzureML evaluation contract ready for CI/CD pipelines and Responsible AI dashboards.
+</solution>

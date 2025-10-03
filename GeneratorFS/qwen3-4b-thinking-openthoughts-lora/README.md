@@ -37,12 +37,12 @@ This model was trained with SFT.
 
 ### Framework versions
 
-- PEFT 0.17.0
-- TRL: 0.21.0
-- Transformers: 4.55.2
-- Pytorch: 2.7.0
-- Datasets: 4.0.0
-- Tokenizers: 0.21.4
+- PEFT 0.17.1
+- TRL: 0.23.1
+- Transformers: 4.56.2
+- Pytorch: 2.8.0
+- Datasets: 4.1.1
+- Tokenizers: 0.22.1
 
 ## Citations
 

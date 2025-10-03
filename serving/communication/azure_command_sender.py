@@ -47,7 +47,7 @@ def send_azure_command(payload: Dict[str, Any], timeout_s: int = 10) -> str:
     async def _wait_for_response():
         for _ in range(timeout_s):
             try:
-                reward_topic = ServiceBusTopic(SERVICE_BUS_CONNECTION_STRING, topic_name=REWARD_TOPIC_NAME, subscription_name=REWARD_SUBSCRIPTION_NAME
+                reward_topic = ServiceBusTopic(SERVICE_BUS_CONNECTION_STRING, topic_name=REWARD_TOPIC_NAME, subscription_name=REWARD_SUBSCRIPTION_NAME)
                 resp = await reward_topic.receive_web_reward_async()
                 if resp and resp.get("message") not in {"No rewards received", "No messages received"}:
                     return resp
