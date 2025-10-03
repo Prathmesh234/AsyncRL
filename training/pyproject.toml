@@ -1,0 +1,19 @@
+[project]
+name = "training-env"
+version = "0.1.0"
+description = "Training utilities environment"
+authors = [
+    { name = "RL Envs Team" }
+]
+requires-python = ">=3.9"
+dependencies = [
+    "dotenv>=0.9.9",
+    "openai",
+    "python-dotenv",
+    "safe>=0.4",
+    "safetensors>=0.6.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

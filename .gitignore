@@ -8,3 +8,4 @@ azure-env/.env
 # Notebook artifacts
 .ipynb_checkpoints/
 code-env/.env
+training/.env

@@ -1,5 +1,5 @@
 class CurriculumTask:
-    def generate_super_easy_tasks(self):
+    def generate_easy_tasks(self):
         return [
         # ----------------------------------------------------------------------
         # Data Engineering Basics (Code + Azure Artifact + Web/Doc Lookup)
