@@ -34,39 +34,54 @@ def tool_reward_fn(completions, **kwargs):
             
             r = 0.0
             
-            # 1. Reward for <think> tag presence
+            # 1. Reward for <think> tag presence (only if properly closed)
             if "<think>" in content and "</think>" in content:
-                r += 0.2
-                logger.info(f"<think> tag found in completion {i}")
-            
-            # 2. Reward for <web> tag presence
-            if "<web>" in content and "</web>" in content:
-                r += 0.3
-                logger.info(f"<web> tag found in completion {i}")
-                
-                # Extra reward for proper web tag format
-                web_pattern = r"<web>\s*\{\s*\"type\":\s*\"web\",\s*\"q\":\s*\"[^\"]+\",\s*\"k\":\s*\d+\s*\}\s*</web>"
-                if re.search(web_pattern, content):
+                # Count opening and closing tags to ensure they match
+                think_opens = content.count("<think>")
+                think_closes = content.count("</think>")
+                if think_opens == think_closes:
                     r += 0.2
-                    logger.info(f"Proper web tag format found in completion {i}")
+                    logger.info(f"<think> tag properly paired in completion {i}")
             
-            # 3. Reward for <code> tag presence
+            # 2. Reward for <web> tag presence (only if properly closed)
+            if "<web>" in content and "</web>" in content:
+                web_opens = content.count("<web>")
+                web_closes = content.count("</web>")
+                if web_opens == web_closes:
+                    r += 0.3
+                    logger.info(f"<web> tag properly paired in completion {i}")
+            
+            # 3. Reward for <code> tag presence (only if properly closed)
             if "<code>" in content and "</code>" in content:
-                r += 0.3
-                logger.info(f"<code> tag found in completion {i}")
+                code_opens = content.count("<code>")
+                code_closes = content.count("</code>")
+                if code_opens == code_closes:
+                    r += 0.3
+                    logger.info(f"<code> tag properly paired in completion {i}")
             
-            # 4. Reward for <azure> tag presence
+            # 4. Reward for <azure> tag presence (only if properly closed)
             if "<azure>" in content and "</azure>" in content:
-                r += 0.3
-                logger.info(f"<azure> tag found in completion {i}")
+                azure_opens = content.count("<azure>")
+                azure_closes = content.count("</azure>")
+                if azure_opens == azure_closes:
+                    r += 0.3
+                    logger.info(f"<azure> tag properly paired in completion {i}")
             
-            # 5. Reward for proper pattern: <think>...<answer>...
-            think_answer_pattern = r"<think>.*?</think>.*?<solution>.*?</solution>"
-            if re.search(think_answer_pattern, content, re.DOTALL):
-                r += 0.4
+            # 5. Reward for <solution> tag presence (only if properly closed)
+            if "<solution>" in content and "</solution>" in content:
+                solution_opens = content.count("<solution>")
+                solution_closes = content.count("</solution>")
+                if solution_opens == solution_closes:
+                    r += 0.4
+                    logger.info(f"<solution> tag properly paired in completion {i}")
+            
+            # 6. Reward for proper pattern: <think>...<solution>...
+            think_solution_pattern = r"<think>.*?</think>.*?<solution>.*?</solution>"
+            if re.search(think_solution_pattern, content, re.DOTALL):
+                r += 0.5
                 logger.info(f"Think->Solution pattern found in completion {i}")
             
-            # 6. Reward for longer answers (more detailed responses)
+            # 7. Reward for longer answers (more detailed responses)
             if len(content) > 200:
                 length_bonus = min(0.3, len(content) / 1000)  # Up to 0.3 bonus for long answers
                 r += length_bonus

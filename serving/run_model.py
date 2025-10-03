@@ -31,7 +31,7 @@ def _int_from_env(name: str, default: int) -> int:
 load_dotenv()
 
 MAX_TOOL_TURNS = _int_from_env("MAX_TOOL_TURNS", 6)
-TURN_MAX_NEW_TOKENS = _int_from_env("TURN_MAX_NEW_TOKENS", 512)
+TURN_MAX_NEW_TOKENS = _int_from_env("TURN_MAX_NEW_TOKENS", 1024)
 
 # Tool execution functions
 def run_web_tool(payload: str) -> str:
@@ -67,13 +67,11 @@ def run_azure_tool(payload: str) -> str:
 # Load environment variables from .env file
 load_dotenv()
 
-# NOTE: To use the GRPO-trained model, you need to:
-# 1. Stop your current vLLM server
-# 2. Start vLLM server with the GRPO-trained model:
-#    python -m vllm.entrypoints.openai.api_server \
-#    --model /home/ubuntu/GeneratorFS/grpo-qwen-training/checkpoint-100 \
-#    --served-model-name qwen-lora \
-#    --port 8000
+# NOTE: To use the GRPO + thinking adapters:
+# 1. Run: uv run main.py (starts vLLM with both GRPO and thinking LoRA adapters)
+# 2. This loads Qwen3-4B-Thinking-2507 base model with:
+#    - grpo-adapter: GRPO-trained weights for tool usage/formatting
+#    - thinking-lora: Enhanced reasoning capabilities
 
 client = OpenAI(
     base_url=os.getenv("OPENAI_BASE_URL", "http://localhost:8000/v1"),
@@ -146,7 +144,7 @@ def stream_generate_with_tools(messages, max_turns=MAX_TOOL_TURNS, turn_max_new_
         
         # Create streaming completion
         stream = client.chat.completions.create(
-            model="qwen-lora",
+            model="grpo-adapter",  # Use the GRPO adapter which includes tool/format training
             messages=messages + [{"role": "assistant", "content": conversation}] if conversation else messages,
             stream=True,
             max_tokens=turn_max_new_tokens,

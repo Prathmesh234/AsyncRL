@@ -1,106 +1,140 @@
 import os
 import logging
 import sys
-# Add parent directory to path so sibling package 'reward_fn' is importable when running from GRPO folder
+from dotenv import load_dotenv
+from datasets import Dataset
+from trl import GRPOConfig, GRPOTrainer
+from peft import PeftModel, PeftConfig
+from transformers import AutoModelForCausalLM
+
+# Set CUDA memory optimization
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
+# ---------------------------
+# Setup logging
+# ---------------------------
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# ---------------------------
+# Paths & imports
+# ---------------------------
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PARENT_DIR = os.path.abspath(os.path.join(CURRENT_DIR, '..'))
 if PARENT_DIR not in sys.path:
     sys.path.insert(0, PARENT_DIR)
-from dotenv import load_dotenv
-from datasets import Dataset
-from trl import GRPOConfig, GRPOTrainer
-from peft import LoraConfig
+
+# Import reward functions after path setup
 from reward_fn.tool_reward import tool_reward_fn
 from reward_fn.char_reward import char_reward_fn
 from reward_fn.format_reward import format_reward_fn
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Load environment variables
+load_dotenv(os.path.join(PARENT_DIR, ".env"))
 
-# Load environment variables from parent directory
-load_dotenv("../.env")
-
-# Get system prompt from environment
+# ---------------------------
+# Env vars
+# ---------------------------
 SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "You are a helpful AI assistant.")
-
-
 WANDB_DISABLED_VALUES = {"1", "true", "yes"}
+wandb_enabled = os.getenv("WANDB_DISABLED", "").strip().lower() not in WANDB_DISABLED_VALUES
+
+# ---------------------------
+# Weights & Biases setup
+# ---------------------------
+if wandb_enabled:
+    import wandb
+    if not os.getenv("WANDB_API_KEY"):
+        logger.warning("WANDB_API_KEY not set — logging may fail.")
+
+    project = os.getenv("WANDB_PROJECT", "grpo-training")
+    run_name = os.getenv("WANDB_RUN_NAME", None)
+    entity = os.getenv("WANDB_ENTITY", None)  # optional: your W&B username/org
+
+    wandb.init(
+        project=project,
+        name=run_name,
+        entity=entity,
+        sync_tensorboard=True,
+        save_code=True
+    )
+    logger.info(f"Weights & Biases logging enabled → project='{project}', run='{wandb.run.name}'")
+else:
+    logger.info("Weights & Biases logging disabled via WANDB_DISABLED env flag.")
 
 
 def main():
+    # ---------------------------
+    # Dataset
+    # ---------------------------
     USER_TASKS = [
-    # Level 1: Easy (Single Tool)
-    "Search for FastAPI docs and create a simple POST endpoint for user registration.",
-    "Look up PostgreSQL connection examples and write Python code with error handling.",
-    "Find matplotlib tutorials and create a Python script for generating sales charts.",
-    "Search for JWT authentication tutorials and implement token validation in JavaScript.",
-    "Look up pytest documentation and write tests for a REST API.",
-    "Search for Express.js security best practices and add Helmet middleware to an API.",
-    "Find React hooks documentation and build a login form component with validation.",
+        # Level 1: Easy (Single Tool)
+    "Your team is prototyping a small signup feature for a hackathon project. A backend service is needed to accept user details. Search FastAPI documentation and design a POST endpoint that safely stores a new user's data.",
+    "A student app you built keeps crashing whenever it loses its connection to the database. Investigate PostgreSQL connection examples and write Python code that includes error handling and retries to make it more resilient.",
+    "The sales department wants to understand trends from last quarter. They’ve handed you CSV data but need visual insights. Look up matplotlib tutorials and create a Python script that produces clear bar and line charts for sales.",
+    "Your authentication flow is incomplete. The product owner requires tokens to be verified before granting access to a dashboard. Search JWT authentication tutorials and implement validation logic in a small JavaScript app.",
+    "A REST API you delivered has no tests, and QA flagged it as a risk. Search pytest documentation and create basic unit tests to verify endpoints return expected responses.",
+    "An external audit flagged missing HTTP headers in your Node.js API. Look up Express.js security best practices and add middleware that strengthens protection against common attacks.",
+    "A React-based login form allows empty submissions and confuses users. Find React hooks documentation and create a component that validates input before allowing a login attempt.",
 
     # Level 2: Medium (Web + Code / Web + Azure)
-    "Search for Azure App Service deployment guides and deploy a simple web application.",
-    "Find Azure CLI documentation and create a resource group in the West Europe region.",
-    "Search for Redis tutorials, set up Azure Cache, and implement caching in Express.js API.",
-    "Look up Docker best practices and create a Dockerfile for a Node.js Express app.",
-    "Search for Azure Functions bindings docs and implement a queue-triggered function in Python.",
-    "Find Azure Key Vault docs and write code to retrieve secrets in a Flask app.",
-    "Search for TypeScript interfaces guide and create data models for e-commerce system.",
-    "Look up database indexing strategies and optimize PostgreSQL queries for user table.",
+    "A client wants to show a demo of their site running live in the cloud. Search Azure App Service deployment guides and deploy a small sample web application so they can preview it.",
+    "The operations team asked for a new sandbox environment. Search Azure CLI documentation and create a resource group in a specific region to prepare for other resources.",
+    "Users are complaining that their search results load slowly after multiple requests. Research Redis tutorials, configure Azure Cache for Redis, and add caching to an Express.js backend to speed things up.",
+    "Your manager wants the current API containerized so it can run in staging. Look up Docker best practices and write a Dockerfile that works well for a Node.js Express app.",
+    "Background job processing is required to handle image uploads asynchronously. Search Azure Functions bindings documentation and implement a Python queue-triggered function to process uploaded files.",
+    "Secrets are currently hardcoded in your Flask app, which is insecure. Find Azure Key Vault documentation and update the code so secrets are pulled dynamically at runtime.",
+    "An e-commerce project needs strong type safety for data models. Look up TypeScript interfaces and design interfaces for products, orders, and user accounts to ensure consistency across the system.",
+    "Customer complaints suggest the user table is slowing queries in production. Research indexing strategies and improve PostgreSQL query performance with indexing on key fields.",
 
     # Level 3: Advanced (Triple Tools / Multi-step)
-    "Find MongoDB Atlas docs, create Azure VM, and write Python script for database migration.",
-    "Look up SignalR Azure docs and build a real-time notification system in Node.js.",
-    "Search for SendGrid API docs, configure Azure Function, and create email service endpoint.",
-    "Research microservices patterns, create Azure container instances, and implement service discovery.",
-    "Look up Azure CDN tutorials and deploy static assets for a React frontend.",
-    "Search for Kubernetes docs, create Azure AKS cluster, and write deployment YAML files.",
-    "Research monitoring best practices, set up Azure Monitor, and create custom dashboards with alerts.",
-    "Find security best practices, configure Azure AD, and implement role-based access control.",
+    "The company is moving away from a local database. Look up MongoDB Atlas documentation, provision an Azure VM, and write a Python script to migrate existing data to the new hosted database.",
+    "A new chat feature is needed for the learning platform. Search Azure SignalR documentation and implement a Node.js service that supports real-time notifications between users.",
+    "Marketing requested automated email confirmations for new signups. Find SendGrid API documentation, configure an Azure Function, and implement a service endpoint that sends emails.",
+    "Leadership is asking for a microservices demo to evaluate scalability. Research microservices architecture, deploy multiple services on Azure Container Instances, and configure basic service discovery.",
+    "Static images and JS bundles are loading too slowly for international users. Look up Azure CDN tutorials and configure a CDN to serve React frontend assets globally.",
+    "The team is standardizing deployments with Kubernetes. Search Azure AKS documentation, provision a cluster, and prepare YAML manifests to deploy your app’s components.",
+    "Operations wants visibility into system health before launch. Research monitoring practices, enable Azure Monitor, and create dashboards with alerts for API error rates.",
+    "A new customer requires stricter compliance. Look up Azure AD integration guides and configure role-based access so that only admins can access sensitive endpoints.",
 
     # Level 4: Complex Scenarios (Real-life Mini Projects)
-    "Look up CI/CD pipeline examples and write GitHub Actions workflow for automated testing.",
-    "Find GitHub Actions deployment examples and set up CI/CD for Python Flask API.",
-    "Search for backup solutions, create Azure recovery vault, and automate database backups.",
-    "Look up caching strategies, configure Azure Redis, and implement distributed caching in API.",
-    "Search for cron job examples and create a scheduled Azure Function for cleanup tasks.",
-    "Find Bicep examples and write a Bicep template for Azure Storage + Function App.",
-    "Look up Azure Cognitive Services usage and create a text sentiment API."
+    "Developers are wasting time manually testing every pull request. Look up CI/CD pipeline examples and create a GitHub Actions workflow that runs automated test suites on every PR.",
+    "Your team’s Flask API is deployed manually and often fails. Search GitHub Actions deployment workflows and set up a CI/CD pipeline that automatically deploys updates to Azure after tests pass.",
+    "Management requires a recovery plan for critical databases. Search for backup and disaster recovery solutions, configure an Azure Recovery Vault, and automate nightly backups of database resources.",
+    "Users notice inconsistent API performance at scale. Research distributed caching strategies, configure Azure Redis, and integrate it into the backend to handle heavy traffic.",
+    "Temporary files are filling up storage on a service. Search cron job examples and create a scheduled Azure Function that cleans up old files at regular intervals.",
+    "The organization is adopting Infrastructure as Code. Look up Bicep examples and write a Bicep template that provisions Azure Storage and a Function App in one deployment.",
+    "Product managers want to measure customer sentiment in real time. Find Azure Cognitive Services documentation and build an API endpoint that takes text input and returns a sentiment score."
 ]
-    
+
+
     dataset = Dataset.from_list([
         {
-            "prompt": f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n<|im_start|>user\n{task}<|im_end|>\n<|im_start|>assistant\n"
+            "prompt": f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n"
+                      f"<|im_start|>user\n{task}<|im_end|>\n<|im_start|>assistant\n"
         }
         for task in USER_TASKS
     ])
     logger.info(f"Loaded {len(dataset)} prompts into Dataset")
 
-    wandb_enabled = os.getenv("WANDB_DISABLED", "").strip().lower() not in WANDB_DISABLED_VALUES
-    report_to = "wandb" if wandb_enabled else None
-
-    if wandb_enabled and not os.getenv("WANDB_PROJECT"):
-        default_project = "grpo-training"
-        os.environ.setdefault("WANDB_PROJECT", default_project)
-        logger.info("WANDB_PROJECT not set; defaulting to '%s'", default_project)
-
-    if wandb_enabled:
-        logger.info("Weights & Biases logging enabled; reporting to '%s'", os.getenv("WANDB_PROJECT"))
-    else:
-        logger.info("Weights & Biases logging disabled via WANDB_DISABLED env flag.")
+    # ---------------------------
+    # Training config
+    # ---------------------------
+    report_to = "wandb" if wandb_enabled else "none"
 
     training_args = GRPOConfig(
-        output_dir="/home/ubuntu/GeneratorFS/grpo-qwen-training",
+        output_dir="/home/ubuntu/GeneratorFS/grpo-qwen-post-traj-sft",
         use_vllm=True,
         vllm_mode="colocate",
-        vllm_gpu_memory_utilization=0.3,
+        vllm_gpu_memory_utilization=0.3,  
         max_steps=100,
-        num_generations=2,                 # Generate 1 rollout for simple testing
-        per_device_train_batch_size=2,
+        num_generations=2,
+        per_device_train_batch_size=2,    
         logging_steps=5,
         learning_rate=5e-6,
         save_steps=50,
+        max_prompt_length=1536,           # Reduced from 2048 to 1536
+        max_completion_length=2500,       # Reduced from 6000 to 2500
         report_to=report_to,
         log_completions=wandb_enabled,
         wandb_log_unique_prompts=wandb_enabled,
@@ -108,31 +142,28 @@ def main():
         run_name=os.getenv("WANDB_RUN_NAME") if wandb_enabled else None,
     )
 
-    logger.info("Initializing GRPO Trainer with multiple reward functions...")
-    logger.info("Using reward functions: tool_reward, char_reward, format_reward")
+    logger.info("Initializing GRPO Trainer with existing trained models...")
 
-    # For LoRA models, we need to specify the base model and LoRA config
-    base_model = "Qwen/Qwen3-4B-Thinking-2507"  # Base model from adapter config
+    # ---------------------------
+    # Load base model + trained adapter
+    # ---------------------------
+    # Use existing GRPO-trained model as base
+    base_model_path = "/home/ubuntu/GeneratorFS/grpo-qwen-training/checkpoint-100"  # Latest GRPO checkpoint
+    # Use checkpoint-240 adapter from training directory
+    adapter_path = "/home/ubuntu/GeneratorFS/training/training/training_script/qwen3-4b-thinking-openthoughts-lora/checkpoint-240"
+
+    # Load GRPO-trained base model + LoRA adapter
+    logger.info(f"Loading GRPO-trained base model: {base_model_path}")
+    model = AutoModelForCausalLM.from_pretrained(base_model_path)
     
-    # Configure LoRA settings from your existing adapter
-    from peft import LoraConfig
-    
-    peft_config = LoraConfig(
-        task_type="CAUSAL_LM",
-        inference_mode=False,  # Set to False for training
-        r=8,  # from your adapter_config.json
-        lora_alpha=16,
-        lora_dropout=0.1,
-        target_modules=["o_proj", "q_proj", "k_proj", "v_proj"],  # from your config
-        bias="none"
-    )
-    
+    logger.info(f"Loading LoRA adapter: {adapter_path}")
+    model = PeftModel.from_pretrained(model, adapter_path)
+
     trainer = GRPOTrainer(
-        model=base_model,             # Use base model
-        peft_config=peft_config,      # Apply LoRA configuration
+        model=model,
         train_dataset=dataset,
         args=training_args,
-        reward_funcs=[tool_reward_fn, char_reward_fn, format_reward_fn]  # Multiple reward functions
+        reward_funcs=[tool_reward_fn, char_reward_fn, format_reward_fn]
     )
 
     logger.info("Starting GRPO training...")

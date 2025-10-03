@@ -49,7 +49,20 @@ def format_reward_fn(completions, **kwargs):
                     else:
                         r -= 0.05  # Penalty for mismatched tags
             
-            # 2. Reward for JSON format in tool tags
+            # 2. Reward for proper tool tag format patterns
+            # Check for exact format patterns specified in system prompt
+            tool_format_patterns = [
+                (r"<web>\s*\{\s*\"type\":\s*\"web\",\s*\"q\":\s*\"[^\"]+\",\s*\"k\":\s*([1-9]|10)\s*\}\s*</web>", 'web'),
+                (r"<code>\s*\{\s*\"type\":\s*\"code\",\s*\"code_command\":\s*\"[^\"]+\"\s*\}\s*</code>", 'code'),
+                (r"<azure>\s*\{\s*\"type\":\s*\"azure\",\s*\"azure_command\":\s*\"[^\"]+\"\s*\}\s*</azure>", 'azure')
+            ]
+            
+            for pattern, tool_type in tool_format_patterns:
+                if re.search(pattern, content):
+                    r += 0.25  # Strong reward for exact format compliance
+                    logger.info(f"Perfect {tool_type} tag format found in completion {i}")
+            
+            # 3. General JSON format validation in tool tags
             json_patterns = [
                 (r'<web>\s*(\{[^}]+\})\s*</web>', 'web'),
                 (r'<code>\s*(\{[^}]+\})\s*</code>', 'code'),
@@ -68,7 +81,7 @@ def format_reward_fn(completions, **kwargs):
 
                     payload_type = str(data.get("type", "")).strip().lower()
                     if payload_type == tool_type:
-                        r += 0.15  # Good reward for valid JSON with correct type
+                        r += 0.10  # Moderate reward for valid JSON with correct type
                         logger.info(f"Valid JSON in {tool_type} tag in completion {i}")
                     else:
                         r -= 0.05  # Penalize missing/mismatched type to reinforce schema
@@ -76,7 +89,7 @@ def format_reward_fn(completions, **kwargs):
                             f"Incorrect or missing type in {tool_type} tag in completion {i}: {payload_type!r}"
                         )
             
-            # 3. Reward for proper workflow structure
+            # 4. Reward for proper workflow structure
             # Check for think -> action -> solution pattern
             has_think = '<think>' in content and '</think>' in content
             has_action = any(tag in content for tag in ['<web>', '<code>', '<azure>'])
@@ -94,12 +107,12 @@ def format_reward_fn(completions, **kwargs):
                 r += 0.1  # Bonus for complete workflow
                 logger.info(f"Complete Think -> Action -> Solution workflow in completion {i}")
             
-            # 4. Reward for proper line breaks and structure
+            # 5. Reward for proper line breaks and structure
             lines = content.split('\n')
             if len(lines) > 3:
                 r += 0.05  # Bonus for multi-line structure
             
-            # 5. Reward for code formatting
+            # 6. Reward for code formatting
             if '```' in content:
                 code_blocks = re.findall(r'```[\s\S]*?```', content)
                 for block in code_blocks:
@@ -107,7 +120,7 @@ def format_reward_fn(completions, **kwargs):
                         r += 0.1
                         logger.info(f"Multi-line code block found in completion {i}")
             
-            # 6. Reward for list formatting
+            # 7. Reward for list formatting
             list_patterns = [
                 r'^\s*[-*+]\s+',  # Bullet points
                 r'^\s*\d+\.\s+',  # Numbered lists
@@ -120,13 +133,13 @@ def format_reward_fn(completions, **kwargs):
                     logger.info(f"List formatting found in completion {i}")
                     break
             
-            # 7. Penalty for overly complex nested structures
+            # 8. Penalty for overly complex nested structures
             total_tags = sum(content.count(f'<{tag}>') for tag in ['think', 'web', 'code', 'azure', 'solution'])
             if total_tags > 6:  # Too many tags might indicate confusion
                 r -= 0.1
                 logger.warning(f"Too many tags ({total_tags}) in completion {i}")
             
-            # 8. Reward for proper spacing around tags
+            # 9. Reward for proper spacing around tags
             well_spaced_tags = 0
             for tag in ['think', 'web', 'code', 'azure', 'solution']:
                 pattern = rf'\n\s*<{tag}>.*?</{tag}>\s*\n'

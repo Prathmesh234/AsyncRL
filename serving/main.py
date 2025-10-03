@@ -3,19 +3,22 @@ import sys
 import os
 
 def main():
-    print("Starting vLLM server for LoRA-trained Qwen model...")
+    print("Starting vLLM server with GRPO post-trajectory SFT adapter...")
     
-    # Path to your LoRA model (use absolute path)
-    lora_path = "/home/ubuntu/GeneratorFS/training/training/training_script/qwen3-4b-thinking-openthoughts-lora"
+    # Use original base model (GRPO checkpoint only contains adapter weights)
+    base_model_path = "Qwen/Qwen3-4B-Thinking-2507"
+    # Path to GRPO-trained adapter (already includes thinking LoRA behavior)
+    grpo_adapter_path = "/home/ubuntu/GeneratorFS/grpo-qwen-post-traj-sft/checkpoint-100"
     
-    # vLLM serve command
+    # vLLM serve command with GRPO adapter only
+    # Note: GRPO adapter was trained on base+thinking_lora, so it already incorporates both behaviors
     cmd = [
-        "vllm", "serve", "Qwen/Qwen3-4B-Thinking-2507",
+        "vllm", "serve", base_model_path,
         "--dtype", "auto",
         "--max-model-len", "128000",
         "--api-key", "token-abc123",
         "--enable-lora",
-        "--lora-modules", f"qwen-lora={lora_path}"
+        "--lora-modules", f"grpo-adapter={grpo_adapter_path}"
     ]
     
     try:
