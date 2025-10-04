@@ -86,7 +86,7 @@ def run_azure_tool(payload: str) -> str:
 # -------------------------------
 
 class ToolCallingGRPOTrainer(GRPOTrainer):
-    """Extension of GRPOTrainer adding streaming + tool interleaving during TRAINING.
+    """Extension of GRPOTrainer adding streaming + multi turn tool call during TRAINING.
 
     Flow per completion:
       * Stream tokens
@@ -103,7 +103,7 @@ class ToolCallingGRPOTrainer(GRPOTrainer):
         return super()._step(*args, **kwargs)
 
     def _stream_generate_one(self, prompt_text: str, max_turns: int = 6, turn_max_new_tokens: int = 256) -> str:
-        """Run multi-turn streaming generation for a single prompt, with tool interception.
+        """Run multi-turn streaming generation for a single prompt, with multi turn tool calling.
         Returns ONLY the completion portion (excluding the original prompt_text)."""
         print("[GEN] start")  # simple high-level generation start notice
         conversation = prompt_text

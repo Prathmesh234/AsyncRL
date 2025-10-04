@@ -50,19 +50,21 @@ dataset = Dataset.from_list([
     {"prompt": f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n<|im_start|>user\n{t}<|im_end|>\n<|im_start|>assistant\n"} for t in USER_TASKS
 ])
 
-wandb_enabled = os.getenv("WANDB_DISABLED", "").strip().lower() not in WANDB_DISABLED_VALUES
+# Use ToolGRPOTrainer-specific wandb configuration
+tool_grpo_api_key = os.getenv("TOOL_GRPO_WANDB_API_KEY")
+tool_grpo_project = os.getenv("TOOL_GRPO_WANDB_PROJECT", "ToolGRPOTrainer Telemetry")
+tool_grpo_run_name = os.getenv("TOOL_GRPO_WANDB_RUN_NAME", "multi-turn-tool-calling-grpo")
+
+wandb_enabled = os.getenv("WANDB_DISABLED", "").strip().lower() not in WANDB_DISABLED_VALUES and tool_grpo_api_key is not None
 report_to = "wandb" if wandb_enabled else None
 
-if wandb_enabled and not os.getenv("WANDB_PROJECT"):
-    default_project = "tool-grpo"
-    os.environ.setdefault("WANDB_PROJECT", default_project)
-    print(f"[PRINT] WANDB_PROJECT not set; defaulting to {default_project}")
-
+# Set ToolGRPOTrainer-specific wandb environment variables for the training
 if wandb_enabled:
-    project_name = os.getenv("WANDB_PROJECT")
-    print(f"[PRINT] WANDB logging enabled -> project={project_name}")
+    os.environ["WANDB_API_KEY"] = tool_grpo_api_key
+    os.environ["WANDB_PROJECT"] = tool_grpo_project
+    print(f"[PRINT] ToolGRPOTrainer WANDB logging enabled -> project={tool_grpo_project}")
 else:
-    print("[PRINT] WANDB logging disabled via WANDB_DISABLED env flag.")
+    print("[PRINT] ToolGRPOTrainer WANDB logging disabled (no API key or WANDB_DISABLED flag set)")
 
 print(f"[PRINT] Dataset size={len(dataset)} example_prompt=\n{dataset[0]['prompt'][:300]!r}")
 
@@ -79,7 +81,7 @@ training_args = GRPOConfig(
     log_completions=wandb_enabled,
     wandb_log_unique_prompts=wandb_enabled,
     num_completions_to_print=4 if wandb_enabled else 0,
-    run_name=os.getenv("WANDB_RUN_NAME") if wandb_enabled else None,
+    run_name=tool_grpo_run_name if wandb_enabled else None,
 )
 print("[PRINT] Training args ready")
 
@@ -96,9 +98,24 @@ peft_config = LoraConfig(
 print("[PRINT] LoRA config ready")
 
 print("[PRINT] Instantiating trainer (this will load model)...")
+
+# Use the same setup as GRPO/run_grpo.py
+# Load GRPO-trained base model + LoRA adapter (similar to run_grpo.py pattern)
+from transformers import AutoModelForCausalLM
+from peft import PeftModel
+
+base_model_path = "/home/ubuntu/GeneratorFS/grpo-qwen-training/checkpoint-100"  # Latest GRPO checkpoint
+adapter_path = "/home/ubuntu/GeneratorFS/training/training/training_script/qwen3-4b-thinking-openthoughts-lora/checkpoint-240"
+
+print(f"[PRINT] Loading GRPO-trained base model: {base_model_path}")
+model = AutoModelForCausalLM.from_pretrained(base_model_path)
+
+print(f"[PRINT] Loading LoRA adapter: {adapter_path}")
+model = PeftModel.from_pretrained(model, adapter_path)
+
 trainer = ToolCallingGRPOTrainer(
-    model="Qwen/Qwen3-4B-Thinking-2507",  # Base model
-    peft_config=peft_config,
+    model=model,  # Pre-loaded model with GRPO + LoRA
+    peft_config=peft_config,  # Additional LoRA for tool calling
     train_dataset=dataset,
     args=training_args,
     reward_funcs=tool_reward_fn,
