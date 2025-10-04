@@ -3,7 +3,7 @@ services:
     build: .
     image: ${ACR_REGISTRY:-yourregistry}.azurecr.io/code-env:${IMAGE_TAG:-latest}
     ports:
-      - "8001:8001"
+      - "8002:8002"
     volumes:
       - ./logger:/app/logger
       - ./projects:/app/projects
