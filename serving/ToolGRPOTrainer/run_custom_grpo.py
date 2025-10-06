@@ -5,44 +5,63 @@ from trl import GRPOConfig
 from peft import LoraConfig
 from custom_grpo import ToolCallingGRPOTrainer
 from reward_fn.tool_reward import tool_reward_fn
+from reward_fn.char_reward import char_reward_fn
+from reward_fn.format_reward import format_reward_fn
+from reward_fn.external_judge_reward import external_judge_reward_fn
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 print("[PRINT] run_custom_grpo.py importing & preparing dataset")
 
 WANDB_DISABLED_VALUES = {"1", "true", "yes"}
 
-# System prompt (match style of run_grpo.py) with explicit tool instructions
+# Multiple reward functions will be combined automatically by the TRL library
 
-'''
-WE HAVE OPTIMIZE THE PROMPT AND MAKE SURE IT USES THE PROMPT IN THE .env fle 
-
-
-'''
-SYSTEM_PROMPT = os.getenv(
-    "SYSTEM_PROMPT",
-    (
-        "You are an ORCHESTRATOR/CODING AGENT. Complete real tasks by calling tools and returning a concise final solution.\n"
-        "ALLOWED TAGS ONLY\n"
-        '- <think>...</think> — plan the next step when needed.\n'
-        '- <web>{\"type\": \"web\", \"q\": \"search terms\", \"k\": INTEGER}</web> — q must be non-empty; k must be an integer between 1 and 10.\n'
-        '- <code>{\"type\": \"code\", \"code_command\": \"shell command\"}</code> — command must be a non-empty string.\n'
-        '- <azure>{\"type\": \"azure\", \"azure_command\": \"az subcommand\"}</azure> — command must be a non-empty string.\n'
-        '- <solution>...</solution> — final answer for the user.\n'
-        "TOOL PAYLOAD RULES\n"
-        "- Wrap only the JSON object inside the tool tag and emit nothing else on that turn.\n"
-        "- The JSON must match exactly one of the schemas above — no extra fields, comments, or metadata (never add request_id).\n"
-        "- Emit exactly one tool tag per turn and wait for <tool_result> before continuing.\n"
-        "- Finish in <solution>...</solution> once requirements are satisfied."
-    )
-)
+# System prompt - use the same approach as run_grpo.py (relies on .env file)
+SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "You are a helpful AI assistant.")
 
 
 USER_TASKS = [
-    # Force explicit web tool call (restored explicit tag)
-    "Find the latest stable Python version via the web tool then search for any vulerabilities associated with it. Summarize the findings.",
-    # Force explicit code tool call
-    "Write and execute Python code to print the sum of the first 5 integers: <code>{\"type\": \"code\", \"code_command\": \"python -c 'print(sum(range(1,6)))'\"}</code> then confirm the result.",
-    # Force explicit azure tool call
-    "Simulate an Azure CLI docs lookup using the azure tool: <azure>{\"type\": \"azure\", \"azure_command\": \"az account show --query name -o tsv\"}</azure> then summarize what it does.",
+    # Level 1: Single Tool Usage - Focused tasks with clear objectives
+    "Research the current best practices for Python web application security, focusing on FastAPI and Flask frameworks. Look up the most common vulnerabilities like SQL injection, XSS, and authentication issues. Summarize the top 5 security recommendations and explain how to implement input validation and secure authentication in a Python web API.",
+    
+    "Create a Python script that processes a CSV file containing sales data with columns: date, product_name, quantity, price, customer_region. The script should calculate total revenue per region, find the best-selling product, and generate a summary report showing monthly trends. Include proper error handling for missing data and save the results to a JSON file.",
+    
+    "Use Azure CLI to set up a basic web application infrastructure. Create a resource group in East US, provision a Linux virtual machine (Standard_B1s size), configure a network security group allowing HTTP and SSH traffic, and set up a simple storage account for file uploads. Document each command and explain the purpose of each resource created.",
+    
+    "Research Docker containerization fundamentals for web applications. Compare the benefits of using containers versus traditional deployments, explain the difference between images and containers, and investigate best practices for writing Dockerfiles. Focus on security considerations, image size optimization, and multi-stage builds for production applications.",
+    
+    "Build a Python web scraping tool that extracts product information from an e-commerce website. Use libraries like requests and BeautifulSoup to gather product names, prices, and descriptions. Implement proper rate limiting, handle HTTP errors gracefully, store the data in a SQLite database, and create a simple data visualization showing price distributions using matplotlib.",
+    
+    "Research Azure pricing and service options for small to medium business deployments. Compare the costs and features of Azure App Service versus Virtual Machines for hosting web applications. Analyze storage options (Blob storage vs File storage) and calculate estimated monthly costs for a web application serving 10,000 users with moderate traffic patterns.",
+    
+    # Level 2: Multi-Tool Usage - Coordinated workflows with practical applications  
+    "Research Redis caching strategies for web applications, focusing on cache-aside patterns and TTL (time-to-live) settings. Then implement a Python Flask application that uses Redis for caching database query results. Include functions to set, get, and invalidate cache entries, and demonstrate the performance improvement by comparing response times with and without caching enabled.",
+    
+    "Study JWT token authentication for REST APIs, including token structure, expiration handling, and security best practices. Then create a Node.js Express server that implements JWT-based login functionality with user registration, login endpoints, protected routes that require valid tokens, and proper error handling for expired or invalid tokens. Include middleware for token validation.",
+    
+    "Research PostgreSQL database optimization techniques, focusing on indexing strategies and query performance. Then write a Python application using psycopg2 or SQLAlchemy that creates a sample database with user and order tables, implements proper indexing, includes connection pooling for better performance, and provides functions for common database operations with transaction handling.",
+    
+    "Study React component optimization and state management patterns, including useState, useEffect hooks, and component re-rendering. Then build a React application with a product catalog that fetches data from an API, implements search and filter functionality, includes pagination for large datasets, and uses proper error boundaries to handle API failures gracefully.",
+    
+    "Research Azure Key Vault for secure secret management and learn about access policies and managed identities. Then use Azure CLI to create a Key Vault instance, store database connection strings and API keys as secrets, configure access policies for a web application, and demonstrate how to retrieve secrets programmatically using Azure SDK.",
+    
+    "Study Azure Functions for serverless computing, focusing on HTTP triggers and blob storage integration. Then create a serverless image processing function using Azure CLI that automatically resizes uploaded images, stores them in blob storage, and returns the processed image URL. Include proper error handling and monitoring configuration.",
+    
+    # Level 3: Multi-Tool Usage + Integrated Solutions - End-to-end implementations
+    "Research application monitoring and health check best practices for web services, including uptime monitoring and performance metrics. Then create a Python Flask web service with health check endpoints that verify database connectivity and external API availability, write code to send custom metrics to a monitoring service, and use Azure CLI to set up Application Insights with basic alerting rules for service health monitoring.",
+    
+    "Study continuous integration and deployment patterns for web applications, focusing on automated testing and containerized deployments. Then research CI/CD best practices and security scanning, create a simple build script that runs tests and builds a Docker image, and use Azure CLI to configure a basic deployment pipeline that automatically deploys containerized applications to Azure Container Instances when code changes.",
+    
+    "Research database migration strategies and data backup procedures for production applications. Then investigate best practices for migrating application data safely, write a Python script that can export data from one database format and import it to another with data validation checks, and use Azure CLI to set up Azure Database for PostgreSQL with automated backup configuration and connection testing.",
+    
+    "Study serverless architecture patterns and event-driven processing for file uploads and processing workflows. Then research Azure Functions integration with storage services, implement a Python-based image processing function that automatically processes uploaded files (resize, compress, add watermarks), and deploy it using Azure CLI with blob storage triggers and basic monitoring to track processing success rates.",
+    
+    "Research API management and rate limiting techniques for public web services, focusing on request throttling and usage analytics. Then investigate Azure API Management features and security policies, create a Python Flask API with built-in rate limiting using Redis for request counting, and configure Azure API Management using CLI commands to implement additional security policies and developer access controls.",
+    
+    "Study centralized logging practices for distributed applications, including structured logging and log aggregation techniques. Then research log management best practices for microservices, write a Python application that generates structured JSON logs with correlation IDs and custom fields, and use Azure CLI to configure Azure Monitor Log Analytics for log collection with basic queries and dashboards for application monitoring."
 ]
 
 # Wrap prompts similarly to run_grpo.py so formatting is consistent
@@ -118,7 +137,7 @@ trainer = ToolCallingGRPOTrainer(
     peft_config=peft_config,  # Additional LoRA for tool calling
     train_dataset=dataset,
     args=training_args,
-    reward_funcs=tool_reward_fn,
+    reward_funcs=[tool_reward_fn, char_reward_fn, format_reward_fn, external_judge_reward_fn],
 )
 print("[PRINT] Trainer instantiated")
 
