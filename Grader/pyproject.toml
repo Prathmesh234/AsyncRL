@@ -1,0 +1,23 @@
+[project]
+name = "grader-env"
+version = "0.1.0"
+description = "Grader environment for evaluating RL completions using LMCache disaggregated inference"
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+requires-python = ">=3.9"
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "pydantic>=2.5.0",
+    "azure-servicebus",
+    "python-dotenv>=1.0.0",
+    "vllm>=0.5.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]

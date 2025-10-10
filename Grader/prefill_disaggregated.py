@@ -64,7 +64,7 @@ def run_prefill(llm: LLM, server: LMCacheServer, args: argparse.Namespace) -> st
         max_tokens=args.max_tokens,
         repetition_penalty=args.repetition_penalty,
     )
-    request_id = args.request_id or f"prefill-{uuid.uuid4()}"
+    request_id = f"prefill-{uuid.uuid4()}"
     print(f"[Prefill] Prepared sampling params: {sampling_params}.")
     print(f"[Prefill] Starting prefill for request_id={request_id}...")
 
@@ -119,11 +119,6 @@ def main() -> None:
         "--compression",
         default="lz4",
         help="LMCache tensor compression (lz4, none, zstd)",
-    )
-    parser.add_argument(
-        "--request-id",
-        default=None,
-        help="Optional request identifier for the prefill stage",
     )
     args = parser.parse_args()
 
