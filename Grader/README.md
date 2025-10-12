@@ -73,18 +73,12 @@ Both scripts expose the same environment variable `GRADER_PROMPT` so that you ca
 ```
 
 ### Output (Reward Topic)
-```json
-{
-  "type": "grader_results",
-  "query": "User's original query",
-  "completion": "Full trajectory from the agent",
-  "status": "ok",
-  "result": {
-    "grading": "LLM-generated grading feedback",
-    "cache_uri": "lmcache://grader/prefill/..."
-  }
-}
+The grader returns a simple numerical score (1-5) representing the quality of the completion:
 ```
+4
+```
+
+The score is sent as a plain integer value (1=poor, 2=below average, 3=average, 4=good, 5=excellent), not wrapped in any JSON structure.
 
 ## Directory Structure
 
