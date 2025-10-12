@@ -30,6 +30,8 @@ if not SERVICE_BUS_CONNECTION_STRING:
 COMMAND_TOPIC_NAME = os.environ.get("COMMAND_TOPIC_NAME", "commandtopic")
 COMMAND_SUBSCRIPTION_NAME = os.environ.get("COMMAND_SUBSCRIPTION_NAME", "gradersubscription")
 REWARD_TOPIC_NAME  = os.environ.get("REWARD_TOPIC_NAME",  "rewardtopic")
+REWARD_SUBSCRIPTION_NAME = os.environ.get("REWARD_SUBSCRIPTION_NAME", "webrewardsubscription")
+
 
 servicebus_client = ServiceBusClient.from_connection_string(
     conn_str=SERVICE_BUS_CONNECTION_STRING,

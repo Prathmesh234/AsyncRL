@@ -12,7 +12,7 @@ import socket
 import uuid
 
 from vllm import LLM, SamplingParams
-from vllm.lmc import LMCacheConfig, LMCacheServer
+from vllm.config import KVTransferConfig
 
 PROMPT = os.environ.get(
     "GRADER_PROMPT",
@@ -23,6 +23,21 @@ PROMPT = os.environ.get(
 
 def build_llm(args: argparse.Namespace) -> LLM:
     print("[Prefill] Initialising LLM with the GPT-120B-OSS checkpoint...")
+    ktc = KVTransferConfig(
+        kv_connector="LMCacheConnectorV1",
+        kv_role="kv_producer",
+        kv_connector_extra_config={
+            "name": args.cache_namespace,
+            "tensor_parallel_size": 2,
+            "pipeline_parallel_size": 1,
+            "transfer_backend": "nixl",
+            "zmq_control_endpoint": args.control_endpoint,
+            "zmq_data_endpoint": args.data_endpoint,
+            "enable_prefix_caching": True,
+            "enable_chunked_prefill": True,
+            "compression": args.compression,
+        },
+    )
     llm = LLM(
         model="gpt-120b-oss",
         tensor_parallel_size=2,
@@ -30,34 +45,39 @@ def build_llm(args: argparse.Namespace) -> LLM:
         enable_prefix_caching=True,
         enable_lora=False,
         chunked_prefill_enabled=True,
+        kv_transfer_config=ktc,
     )
     print("[Prefill] LLM engine ready with tensor_parallel_size=2 (2xA100 GPUs).")
     return llm
 
 
-def build_cache_server(llm: LLM, args: argparse.Namespace) -> LMCacheServer:
+def build_cache_server(llm: LLM, args: argparse.Namespace) -> KVTransferConfig:
     print("[Prefill] Creating LMCache configuration with NIXL transfer backend...")
-    cache_config = LMCacheConfig(
-        name=args.cache_namespace,
-        tensor_parallel_size=2,
-        pipeline_parallel_size=1,
-        transfer_backend="nixl",
-        zmq_control_endpoint=args.control_endpoint,
-        zmq_data_endpoint=args.data_endpoint,
-        enable_prefix_caching=True,
-        enable_chunked_prefill=True,
-        compression=args.compression,
+    cache_config = KVTransferConfig(
+        kv_connector="LMCacheConnectorV1",
+        kv_role="kv_producer",
+        kv_connector_extra_config={
+            "name": args.cache_namespace,
+            "tensor_parallel_size": 2,
+            "pipeline_parallel_size": 1,
+            "transfer_backend": "nixl",
+            "zmq_control_endpoint": args.control_endpoint,
+            "zmq_data_endpoint": args.data_endpoint,
+            "enable_prefix_caching": True,
+            "enable_chunked_prefill": True,
+            "compression": args.compression,
+        },
     )
     print(
         f"[Prefill] ZeroMQ control endpoint: {args.control_endpoint}; data endpoint: {args.data_endpoint}"
     )
     print("[Prefill] Launching LMCache server... This binds to the ZeroMQ sockets.")
-    server = LMCacheServer(config=cache_config, engine=llm.engine)
+    server = cache_config  # In vLLM v1, LMCache is configured via KVTransferConfig
     print("[Prefill] LMCache server ready to accept prefill requests.")
     return server
 
 
-def run_prefill(llm: LLM, server: LMCacheServer, args: argparse.Namespace) -> str:
+def run_prefill(llm: LLM, server: KVTransferConfig, args: argparse.Namespace) -> str:
     sampling_params = SamplingParams(
         temperature=args.temperature,
         top_p=args.top_p,
@@ -68,19 +88,19 @@ def run_prefill(llm: LLM, server: LMCacheServer, args: argparse.Namespace) -> st
     print(f"[Prefill] Prepared sampling params: {sampling_params}.")
     print(f"[Prefill] Starting prefill for request_id={request_id}...")
 
-    response = server.prefill(
-        prompt=PROMPT,
+    outputs = llm.generate(
+        prompts=[PROMPT],
         sampling_params=sampling_params,
         request_id=request_id,
-        enable_kv_cache=True,
+        use_cached_kv=False,
     )
     print("[Prefill] Prefill completed.")
-    print(f"[Prefill] Cache URI for downstream decode: {response.cache_uri}")
+    print(f"[Prefill] Cache URI for downstream decode: {request_id}")
     print(
         "[Prefill] KV cache shards stored using NIXL transport. Watch ZeroMQ logs "
         "for transfer acknowledgements."
     )
-    return response.cache_uri
+    return request_id
 
 
 def main() -> None:

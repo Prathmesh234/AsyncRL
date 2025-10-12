@@ -11,7 +11,7 @@ import os
 import socket
 
 from vllm import LLM, SamplingParams
-from vllm.lmc import LMCacheClient
+from vllm.config import KVTransferConfig
 
 PROMPT = os.environ.get(
     "GRADER_PROMPT",
@@ -22,6 +22,20 @@ PROMPT = os.environ.get(
 
 def build_llm(args: argparse.Namespace) -> LLM:
     print("[Decode] Initialising LLM with GPT-120B-OSS for decoding...")
+    ktc = KVTransferConfig(
+        kv_connector="LMCacheConnectorV1",
+        kv_role="kv_consumer",
+        kv_connector_extra_config={
+            "name": "grader/prefill",
+            "tensor_parallel_size": 2,
+            "pipeline_parallel_size": 1,
+            "transfer_backend": "nixl",
+            "zmq_control_endpoint": args.control_endpoint,
+            "zmq_data_endpoint": args.data_endpoint,
+            "enable_prefix_caching": True,
+            "enable_chunked_prefill": True,
+        },
+    )
     llm = LLM(
         model="gpt-120b-oss",
         tensor_parallel_size=2,
@@ -29,20 +43,27 @@ def build_llm(args: argparse.Namespace) -> LLM:
         enable_prefix_caching=True,
         enable_lora=False,
         chunked_prefill_enabled=True,
+        kv_transfer_config=ktc,
     )
     print("[Decode] LLM engine warmed up with prefix caching enabled.")
     return llm
 
 
-def build_cache_client(args: argparse.Namespace) -> LMCacheClient:
+def build_cache_client(args: argparse.Namespace) -> KVTransferConfig:
     print("[Decode] Connecting to LMCache server via NIXL transfer backend...")
-    client = LMCacheClient(
-        cache_uri=args.cache_uri,
-        zmq_control_endpoint=args.control_endpoint,
-        zmq_data_endpoint=args.data_endpoint,
-        transfer_backend="nixl",
-        enable_prefix_caching=True,
-        enable_chunked_prefill=True,
+    client = KVTransferConfig(
+        kv_connector="LMCacheConnectorV1",
+        kv_role="kv_consumer",
+        kv_connector_extra_config={
+            "name": "grader/prefill",
+            "tensor_parallel_size": 2,
+            "pipeline_parallel_size": 1,
+            "transfer_backend": "nixl",
+            "zmq_control_endpoint": args.control_endpoint,
+            "zmq_data_endpoint": args.data_endpoint,
+            "enable_prefix_caching": True,
+            "enable_chunked_prefill": True,
+        },
     )
     print(
         f"[Decode] Subscribed to ZeroMQ control={args.control_endpoint} "
@@ -51,7 +72,7 @@ def build_cache_client(args: argparse.Namespace) -> LMCacheClient:
     return client
 
 
-def run_decode(llm: LLM, client: LMCacheClient, args: argparse.Namespace) -> None:
+def run_decode(llm: LLM, client: KVTransferConfig, args: argparse.Namespace) -> None:
     sampling_params = SamplingParams(
         temperature=args.temperature,
         top_p=args.top_p,
@@ -60,18 +81,17 @@ def run_decode(llm: LLM, client: LMCacheClient, args: argparse.Namespace) -> Non
     )
     print(f"[Decode] Using sampling params: {sampling_params}.")
     print(f"[Decode] Fetching KV cache from: {args.cache_uri} ...")
-    cache_state = client.materialise()
     print("[Decode] KV cache materialised. Beginning decode phase...")
 
-    outputs = llm.decode(
-        cache_state=cache_state,
+    outputs = llm.generate(
+        prompts=[PROMPT],
         sampling_params=sampling_params,
-        prompt=PROMPT,
-        enable_kv_cache=True,
+        request_id=args.cache_uri,
+        use_cached_kv=True,
     )
     print("[Decode] Decode completed. Generated text:")
     for output in outputs:
-        print(f"[Decode] request_id={output.request_id} -> {output.outputs[0].text}")
+        print(f"[Decode] request_id={args.cache_uri} -> {output.outputs[0].text}")
     print("[Decode] Finished decoding using LMCache + NIXL transfer.")
 
 

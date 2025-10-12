@@ -16,7 +16,18 @@ WORKDIR /app
 
 COPY pyproject.toml uv.lock ./
 # Use the lock file for reproducible builds
+RUN uv add websocket-client
+# add build tools (safe for vLLM wheels / fallbacks)
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential git && rm -rf /var/lib/apt/lists/*
+
+# install vLLM + LMCache (v1 integration)
+RUN uv pip install vllm lmcache
+
+
+
+
 RUN uv sync --frozen --no-dev
+
 
 COPY src/ ./src/
 COPY prefill_disaggregated.py ./
