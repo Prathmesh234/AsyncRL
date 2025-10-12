@@ -14,9 +14,9 @@ RUN pip install --no-cache-dir uv
 
 WORKDIR /app
 
-COPY pyproject.toml ./
-# (No lock file yet; using sync without --frozen)
-RUN uv sync --no-dev
+COPY pyproject.toml uv.lock ./
+# Use the lock file for reproducible builds
+RUN uv sync --frozen --no-dev
 
 COPY src/ ./src/
 COPY prefill_disaggregated.py ./
