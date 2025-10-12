@@ -15,8 +15,7 @@ from vllm.lmc import LMCacheClient
 
 PROMPT = os.environ.get(
     "GRADER_PROMPT",
-    "You are grading a reinforcement learning assignment. Explain the policy "
-    "updates and provide actionable feedback for the student.",
+    "You are grading a reinforcement learning assignment. Provide ONLY a numerical score from 1 to 5 representing the quality of the completion (1=poor, 2=below average, 3=average, 4=good, 5=excellent). Respond with ONLY the number, no additional text or explanation.",
 )
 
 

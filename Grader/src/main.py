@@ -86,21 +86,14 @@ async def _startup():
                             logger.info(f"[grader_tool][topic] starting grading for query='{query[:50]}...'")
 
                             try:
-                                # Run prefill and decode
-                                result = await run_grading(query, completion, logger)
-                                status = "ok"
+                                # Run prefill and decode - returns just the score (1-5)
+                                score = await run_grading(query, completion, logger)
                             except Exception as e:
-                                status = "error"
-                                result = {"error": str(e)}
+                                score = 3  # Default to middle score on error
                                 logger.exception(f"[grader_tool] error during grading: {e}")
 
-                            reward_payload: Dict[str, Any] = {
-                                "type": "grader_results",
-                                "query": query,
-                                "completion": completion,
-                                "status": status,
-                                "result": result,
-                            }
+                            # Send only the numeric score to the reward queue
+                            reward_payload: int = score
                             try:
                                 await app.state.reward_queue.send(reward_payload)
                             except Exception as exc:
@@ -128,12 +121,12 @@ async def _shutdown():
         except asyncio.CancelledError:
             pass
 
-async def run_grading(query: str, completion: str, logger: logging.Logger) -> Dict[str, Any]:
+async def run_grading(query: str, completion: str, logger: logging.Logger) -> int:
     """
     Run the grading process using prefill and decode scripts.
     """
     # Set environment variable with the full prompt (query + completion)
-    grader_prompt = f"User Query: {query}\n\nCompletion: {completion}\n\nPlease evaluate the quality of this completion and provide feedback."
+    grader_prompt = f"User Query: {query}\n\nCompletion: {completion}\n\nPlease rate this completion's quality from 1 to 5."
 
     # Run prefill script
     logger.info(f"[grader_tool] Running prefill")
@@ -191,12 +184,27 @@ async def run_grading(query: str, completion: str, logger: logging.Logger) -> Di
             break
 
     if not grading_result:
-        grading_result = decode_output
+        grading_result = decode_output.strip()
 
-    return {
-        "grading": grading_result,
-        "cache_uri": cache_uri,
-    }
+    # Parse and validate the numeric score (1-5)
+    try:
+        # Extract only digits from the result
+        import re
+        match = re.search(r'\d+', grading_result)
+        if match:
+            score = int(match.group())
+            # Clamp score to 1-5 range
+            score = max(1, min(5, score))
+        else:
+            logger.warning(f"[grader_tool] Could not extract number from: {grading_result}, defaulting to 3")
+            score = 3
+    except (ValueError, AttributeError) as e:
+        logger.warning(f"[grader_tool] Error parsing score: {e}, defaulting to 3")
+        score = 3
+
+    logger.info(f"[grader_tool] Final score: {score}")
+
+    return score
 
 @app.get("/")
 async def root():
