@@ -36,12 +36,12 @@ def build_llm(args: argparse.Namespace) -> LLM:
         },
     )
     llm = LLM(
-        model="gpt-120b-oss",
+        model="openai/gpt-oss-120b",
         tensor_parallel_size=2,
         trust_remote_code=True,
         enable_prefix_caching=True,
         enable_lora=False,
-        chunked_prefill_enabled=True,
+        enable_chunked_prefill=True,
         kv_transfer_config=ktc,
     )
     print("[Decode] LLM engine warmed up with prefix caching enabled.")
@@ -85,12 +85,10 @@ def run_decode(llm: LLM, client: KVTransferConfig, args: argparse.Namespace) -> 
     outputs = llm.generate(
         prompts=[PROMPT],
         sampling_params=sampling_params,
-        request_id=args.cache_uri,
-        use_cached_kv=True,
     )
     print("[Decode] Decode completed. Generated text:")
     for output in outputs:
-        print(f"[Decode] request_id={args.cache_uri} -> {output.outputs[0].text}")
+        print(f"[Decode] cache_uri={args.cache_uri} -> {output.outputs[0].text}")
     print("[Decode] Finished decoding using LMCache + NIXL transfer.")
 
 

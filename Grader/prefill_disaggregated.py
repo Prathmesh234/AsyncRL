@@ -38,12 +38,12 @@ def build_llm(args: argparse.Namespace) -> LLM:
         },
     )
     llm = LLM(
-        model="gpt-120b-oss",
+        model="openai/gpt-oss-120b",
         tensor_parallel_size=2,
         trust_remote_code=True,
         enable_prefix_caching=True,
         enable_lora=False,
-        chunked_prefill_enabled=True,
+        enable_chunked_prefill=True,
         kv_transfer_config=ktc,
     )
     print("[Prefill] LLM engine ready with tensor_parallel_size=2 (2xA100 GPUs).")
@@ -83,23 +83,21 @@ def run_prefill(llm: LLM, server: KVTransferConfig, args: argparse.Namespace) ->
         max_tokens=args.max_tokens,
         repetition_penalty=args.repetition_penalty,
     )
-    request_id = f"prefill-{uuid.uuid4()}"
+    cache_id = f"prefill-{uuid.uuid4()}"
     print(f"[Prefill] Prepared sampling params: {sampling_params}.")
-    print(f"[Prefill] Starting prefill for request_id={request_id}...")
+    print(f"[Prefill] Starting prefill for cache_id={cache_id}...")
 
     outputs = llm.generate(
         prompts=[PROMPT],
         sampling_params=sampling_params,
-        request_id=request_id,
-        use_cached_kv=False,
     )
     print("[Prefill] Prefill completed.")
-    print(f"[Prefill] Cache URI for downstream decode: {request_id}")
+    print(f"[Prefill] Cache URI for downstream decode: {cache_id}")
     print(
         "[Prefill] KV cache shards stored using NIXL transport. Watch ZeroMQ logs "
         "for transfer acknowledgements."
     )
-    return request_id
+    return cache_id
 
 
 def main() -> None:
