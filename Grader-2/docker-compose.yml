@@ -1,0 +1,23 @@
+services:
+    grader-env-2:
+      container_name: grader-env-2
+      build: .
+      image: ${ACR_REGISTRY:-yourregistry}.azurecr.io/grader-env-2:${IMAGE_TAG:-latest}
+      ports:
+        - "8003:8001"
+      volumes:
+        - ./logger:/app/logger
+      restart: unless-stopped
+      env_file:
+        - .env
+      environment:
+        - ACR_REGISTRY=${ACR_REGISTRY:-yourregistry}
+        - IMAGE_TAG=${IMAGE_TAG:-latest}
+        - NVIDIA_VISIBLE_DEVICES=0,1
+      deploy:
+        resources:
+          reservations:
+            devices:
+              - driver: nvidia
+                count: 2
+                capabilities: [gpu]
