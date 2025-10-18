@@ -1,0 +1,11 @@
+local_cpu: False
+
+# PD-related configurations
+enable_pd: True
+transfer_channel: "nixl" # Using NIXL for transfer
+pd_role: "receiver"        # Decoder acts as KV cache receiver
+pd_peer_host: "localhost"  # Host where decoder is listening
+pd_peer_init_port: 7300    # Port where initialization happens
+pd_peer_alloc_port: 7400   # Port for memory allocation
+pd_buffer_size: 1073741824  # 1GB buffer for KV cache transfer
+pd_buffer_device: "cuda"   # Use GPU memory for buffer

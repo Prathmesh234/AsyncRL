@@ -1,5 +1,6 @@
 import os, json, asyncio, logging
-from typing import Optional, Any, Dict
+import httpx
+from typing import Optional, Any
 from fastapi import FastAPI
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict
@@ -32,6 +33,11 @@ COMMAND_SUBSCRIPTION_NAME = os.environ.get("COMMAND_SUBSCRIPTION_NAME", "graders
 REWARD_TOPIC_NAME  = os.environ.get("REWARD_TOPIC_NAME",  "rewardtopic")
 REWARD_SUBSCRIPTION_NAME = os.environ.get("REWARD_SUBSCRIPTION_NAME", "webrewardsubscription")
 
+# LMCache proxy configuration
+PROXY_HOST = os.getenv('PROXY_HOST', 'localhost')
+PROXY_PORT = os.getenv('PROXY_PORT', '9100')
+PROXY_URL = f"http://{PROXY_HOST}:{PROXY_PORT}"
+MODEL_NAME = os.getenv('MODEL_NAME', 'gpt-120b-oss')
 
 servicebus_client = ServiceBusClient.from_connection_string(
     conn_str=SERVICE_BUS_CONNECTION_STRING,
@@ -57,12 +63,21 @@ async def _startup():
         h.setFormatter(fmt)
         logger.addHandler(h)
         return logger
-    app.state.logger = _setup_logger()
 
+    app.state.logger = _setup_logger()
+    logger = app.state.logger
+
+    # Create HTTP client for communicating with LMCache proxy
+    app.state.http_client = httpx.AsyncClient(timeout=300.0)
+
+    logger.info("[startup] Initializing command and reward queues...")
     app.state.cmd_queue = CommandQueue(aio_servicebus_client, COMMAND_TOPIC_NAME, COMMAND_SUBSCRIPTION_NAME)
     await app.state.cmd_queue.start()
     app.state.reward_queue = RewardQueue(aio_servicebus_client, REWARD_TOPIC_NAME)
     app.state._processed_ids = set()
+
+    logger.info(f"[startup] Connected to LMCache proxy at {PROXY_URL}")
+    logger.info("[startup] System ready for grading requests.")
 
     async def _process_loop():
         while True:
@@ -88,18 +103,18 @@ async def _startup():
                             logger.info(f"[grader_tool][topic] starting grading for query='{query[:50]}...'")
 
                             try:
-                                # Run prefill and decode - returns just the score (1-5)
+                                # Run grading through LMCache proxy
                                 score = await run_grading(query, completion, logger)
+
+                                # Send only the numeric score to the reward queue
+                                reward_payload: int = score
+                                try:
+                                    await app.state.reward_queue.send(reward_payload)
+                                except Exception as exc:
+                                    logger.exception(f"[reward_topic] failed to publish: {exc}")
                             except Exception as e:
-                                score = 3  # Default to middle score on error
                                 logger.exception(f"[grader_tool] error during grading: {e}")
 
-                            # Send only the numeric score to the reward queue
-                            reward_payload: int = score
-                            try:
-                                await app.state.reward_queue.send(reward_payload)
-                            except Exception as exc:
-                                logger.exception(f"[reward_topic] failed to publish: {exc}")
                             app.state._processed_ids.add(msg_id)
                 await asyncio.sleep(0.5)
             except asyncio.CancelledError:
@@ -112,9 +127,14 @@ async def _startup():
 
 @app.on_event("shutdown")
 async def _shutdown():
+    logger = getattr(app.state, "logger", logging.getLogger("grader_tool"))
+
+    # Stop command queue
     cmdq = getattr(app.state, "cmd_queue", None)
     if cmdq:
         await cmdq.stop()
+
+    # Stop background worker
     worker = getattr(app.state, "worker", None)
     if worker:
         worker.cancel()
@@ -123,90 +143,60 @@ async def _shutdown():
         except asyncio.CancelledError:
             pass
 
+    # Close HTTP client
+    http_client = getattr(app.state, "http_client", None)
+    if http_client:
+        await http_client.aclose()
+
+    logger.info("[shutdown] All services stopped.")
+
 async def run_grading(query: str, completion: str, logger: logging.Logger) -> int:
     """
-    Run the grading process using prefill and decode scripts.
+    Run the grading process by sending request to LMCache proxy.
+    The proxy coordinates prefill and decode servers using NIXL for KV cache transfer.
     """
-    # Set environment variable with the full prompt (query + completion)
+    # Build grading prompt
     grader_prompt = f"User Query: {query}\n\nCompletion: {completion}\n\nPlease rate this completion's quality from 1 to 5."
 
-    # Run prefill script
-    logger.info(f"[grader_tool] Running prefill")
-    prefill_process = await asyncio.create_subprocess_exec(
-        "python", "/app/prefill_disaggregated.py",
-        env={**os.environ, "GRADER_PROMPT": grader_prompt},
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    prefill_stdout, prefill_stderr = await prefill_process.communicate()
+    logger.info(f"[grader_tool] Sending request to LMCache proxy at {PROXY_URL}")
 
-    if prefill_process.returncode != 0:
-        logger.error(f"[grader_tool] Prefill failed: {prefill_stderr.decode()}")
-        raise RuntimeError(f"Prefill failed: {prefill_stderr.decode()}")
-
-    # Extract cache_uri from prefill output
-    prefill_output = prefill_stdout.decode()
-    logger.info(f"[grader_tool] Prefill output: {prefill_output}")
-
-    # Parse cache_uri from output (looking for "Final cache URI: ...")
-    cache_uri = None
-    for line in prefill_output.split('\n'):
-        if "Final cache URI:" in line:
-            cache_uri = line.split("Final cache URI:")[-1].strip()
-            break
-
-    if not cache_uri:
-        raise RuntimeError("Could not extract cache_uri from prefill output")
-
-    logger.info(f"[grader_tool] Cache URI: {cache_uri}")
-
-    # Run decode script
-    logger.info(f"[grader_tool] Running decode")
-    decode_process = await asyncio.create_subprocess_exec(
-        "python", "/app/decode_disaggregated.py",
-        "--cache-uri", cache_uri,
-        env={**os.environ, "GRADER_PROMPT": grader_prompt},
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    decode_stdout, decode_stderr = await decode_process.communicate()
-
-    if decode_process.returncode != 0:
-        logger.error(f"[grader_tool] Decode failed: {decode_stderr.decode()}")
-        raise RuntimeError(f"Decode failed: {decode_stderr.decode()}")
-
-    decode_output = decode_stdout.decode()
-    logger.info(f"[grader_tool] Decode output: {decode_output}")
-
-    # Extract generated text from decode output
-    grading_result = None
-    for line in decode_output.split('\n'):
-        if "->" in line:
-            grading_result = line.split("->")[-1].strip()
-            break
-
-    if not grading_result:
-        grading_result = decode_output.strip()
-
-    # Parse and validate the numeric score (1-5)
     try:
-        # Extract only digits from the result
+        # Send request to proxy server
+        response = await app.state.http_client.post(
+            f"{PROXY_URL}/v1/completions",
+            json={
+                "model": MODEL_NAME,
+                "prompt": grader_prompt,
+                "max_tokens": 100,
+            }
+        )
+        response.raise_for_status()
+        result = response.json()
+
+        # Extract the generated text
+        grading_result = result.get('choices', [{}])[0].get('text', '')
+        logger.info(f"[grader_tool] Grading result: {grading_result}")
+
+        # Parse and validate the numeric score (1-5)
         import re
         match = re.search(r'\d+', grading_result)
-        if match:
-            score = int(match.group())
-            # Clamp score to 1-5 range
-            score = max(1, min(5, score))
-        else:
-            logger.warning(f"[grader_tool] Could not extract number from: {grading_result}, defaulting to 3")
-            score = 3
-    except (ValueError, AttributeError) as e:
-        logger.warning(f"[grader_tool] Error parsing score: {e}, defaulting to 3")
-        score = 3
+        if not match:
+            logger.error(f"[grader_tool] Could not extract number from grading result: {grading_result}")
+            raise ValueError(f"Failed to extract numeric score from grading result: {grading_result}")
 
-    logger.info(f"[grader_tool] Final score: {score}")
+        score = int(match.group())
 
-    return score
+        # Validate score is in valid range
+        if score < 1 or score > 5:
+            logger.error(f"[grader_tool] Score {score} is out of valid range (1-5)")
+            raise ValueError(f"Score {score} is out of valid range (1-5). Grading result: {grading_result}")
+
+        logger.info(f"[grader_tool] Final score: {score}")
+        return score
+
+    except Exception as e:
+        logger.exception(f"[grader_tool] Error communicating with LMCache proxy: {e}")
+        raise
 
 @app.get("/")
 async def root():
@@ -216,7 +206,14 @@ async def root():
 async def health():
     try:
         with servicebus_client:
-            return {"status": "healthy"}
+            # Also check if proxy is reachable
+            try:
+                response = await app.state.http_client.get(f"{PROXY_URL}/health", timeout=5.0)
+                proxy_status = "healthy" if response.status_code == 200 else "degraded"
+            except:
+                proxy_status = "unreachable"
+
+            return {"status": "healthy", "proxy_status": proxy_status}
     except Exception as e:
         return {"status": "degraded", "error": str(e)}
 

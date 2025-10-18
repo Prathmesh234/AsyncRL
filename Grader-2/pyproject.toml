@@ -12,6 +12,7 @@ dependencies = [
   "pydantic>=2.5.0",
   "azure-servicebus",
   "python-dotenv>=1.0.0",
+  "httpx>=0.24.0",
 
   # vLLM v1 (KVConnector path; no vllm.lmc)
   "vllm>=0.11.0,<0.12",

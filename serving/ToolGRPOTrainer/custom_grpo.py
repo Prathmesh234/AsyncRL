@@ -30,11 +30,13 @@ try:
     from command_sender import send_web_command
     from azure_command_sender import send_azure_command
     from code_command_sender import send_code_command
+    from grader_command_sender import send_grader_command
 except ImportError:
     # Fallback: attempt relative style if executed in package context
     from ToolGRPOTrainer.command_sender import send_web_command
     from ToolGRPOTrainer.azure_command_sender import send_azure_command
     from ToolGRPOTrainer.code_command_sender import send_code_command
+    from ToolGRPOTrainer.grader_command_sender import send_grader_command
 
 # Minimal logging switches (debug prints removed)
 SHOW_DEBUG = False  # retained for future use if needed
@@ -79,6 +81,24 @@ def run_azure_tool(payload: str) -> str:
         return f"[azure-error] {exc}"
     result = send_azure_command(azure_payload, timeout_s=15)
     _log_tool_usage("azure")
+    return result
+
+def send_to_grader(query: str, completion: str) -> str:
+    """Send query and completion to Grader2 for evaluation.
+
+    This function sends the prompt and completion to the remote Grader-2 service
+    via Service Bus, which will return a numeric score (1-5).
+
+    Args:
+        query: The original user query/prompt
+        completion: The model's generated completion
+
+    Returns:
+        String containing the grading score or error message
+    """
+    print(f"[GRADER] Sending to Grader-2: query={query[:50]}... completion={completion[:50]}...")
+    result = send_grader_command(query, completion, timeout_s=30)
+    print(f"[GRADER] Result: {result}")
     return result
 
 # -------------------------------
