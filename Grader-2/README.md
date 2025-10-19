@@ -16,7 +16,7 @@ FastAPI Application (src/main.py)
 Prefill    Decode
 (GPU 0)    (GPU 1)
    └────┬────┘
-     (NIXL KV Cache Transfer)
+     (LMCache KV Cache Transfer)
         ↓
 Azure Service Bus (reward_queue)
 ```
@@ -46,7 +46,7 @@ Azure Service Bus (reward_queue)
 3. **Request sent to proxy** at `http://localhost:9100/v1/completions`
 4. **Proxy coordinates**:
    - Sends to prefill server (GPU 0)
-   - Prefill processes and sends KV cache via NIXL to decode
+   - Prefill processes and shares KV cache via LMCache to decode
    - Decode generates response
 5. **Response parsed** for numeric score (1-5)
 6. **Score sent** to Azure Service Bus reward_queue
@@ -128,7 +128,6 @@ uvicorn src.main:app --host 0.0.0.0 --port 8001
 - Dependencies:
   - `vllm` (latest main branch)
   - `lmcache` (0.2.1+)
-  - `nixl`
   - `httpx`, `fastapi`, `uvicorn`
   - `azure-servicebus`
 

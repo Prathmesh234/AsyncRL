@@ -7,6 +7,9 @@ set +a
 
 echo "Starting Decode Server on GPU ${DECODE_GPU}..."
 
+# Remove any cached Harmony vocab that may be corrupted.
+rm -rf "${HOME}/.cache/tiktoken"
+
 # Launch Decoder with LMCache
 UCX_TLS="${UCX_TLS}" \
     LMCACHE_CONFIG_FILE="$(dirname "$0")/../lmcache-decoder-config.yaml" \

@@ -8,6 +8,7 @@ ENV PYTHONUNBUFFERED=1 \
 # Install system dependencies including UCX for NVLink/RDMA
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.11 python3-pip \
+    python3-dev python3.10-dev \
     curl ca-certificates bash jq git \
     build-essential \
     libibverbs-dev librdmacm-dev \
@@ -21,9 +22,13 @@ WORKDIR /app
 # Copy dependency files
 COPY pyproject.toml uv.lock ./
 
-# Install Python dependencies (including vLLM, lmcache, nixl)
+# Install Python dependencies (including vLLM and LMCache)
 RUN uv lock
 RUN uv sync --no-dev
+RUN uv add "vllm>=0.11.0,<0.12"
+
+# Add virtual environment to PATH
+ENV PATH="/app/.venv/bin:$PATH"
 
 # Copy application code and configuration
 COPY src/ ./src/

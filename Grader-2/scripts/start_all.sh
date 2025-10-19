@@ -14,7 +14,7 @@ echo "========================================="
 wait_for_service() {
     local url=$1
     local name=$2
-    local max_attempts=60
+    local max_attempts=180  # Increased from 60 to 180 (6 minutes)
     local attempt=0
 
     echo "Waiting for $name to be ready at $url..."
@@ -68,7 +68,7 @@ echo "========================================="
 # Start the FastAPI application (this runs in foreground)
 echo "Starting FastAPI application..."
 cd "$(dirname "$0")/.."
-exec uvicorn src.main:app --host 0.0.0.0 --port 8001
+exec /app/.venv/bin/uvicorn src.main:app --host 0.0.0.0 --port 8001
 
 # Cleanup function (called on exit)
 cleanup() {

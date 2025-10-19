@@ -153,7 +153,7 @@ async def _shutdown():
 async def run_grading(query: str, completion: str, logger: logging.Logger) -> int:
     """
     Run the grading process by sending request to LMCache proxy.
-    The proxy coordinates prefill and decode servers using NIXL for KV cache transfer.
+    The proxy coordinates prefill and decode servers using LMCache for KV cache transfer.
     """
     # Build grading prompt
     grader_prompt = f"User Query: {query}\n\nCompletion: {completion}\n\nPlease rate this completion's quality from 1 to 5."

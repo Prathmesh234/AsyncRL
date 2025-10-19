@@ -19,7 +19,7 @@ services:
         # LMCache Disaggregated Prefill Configuration:
         # - GPU 0: Runs prefill server (via start_prefill.sh)
         # - GPU 1: Runs decode server (via start_decode.sh)
-        # - LMCache uses NIXL for fast KV cache transfer via NVLink/RDMA
+        # - LMCache shares KV cache between prefill and decode with PD disabled
         # - Proxy server coordinates between prefill and decode
         # Commands from Azure Service Bus -> Proxy -> Prefill + Decode -> Response
         - NVIDIA_VISIBLE_DEVICES=0,1

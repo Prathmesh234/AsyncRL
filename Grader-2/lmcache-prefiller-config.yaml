@@ -1,10 +1,4 @@
 local_cpu: False
 
-# PD-related configurations
-enable_pd: True
-transfer_channel: "nixl"  # Using NIXL for transfer
-pd_role: "sender"          # Prefiller acts as KV cache sender
-pd_proxy_host: "localhost" # Host where proxy server is running
-pd_proxy_port: 7500        # Port where proxy server is listening
-pd_buffer_size: 1073741824  # 1GB buffer for KV cache transfer
-nixl_buffer_device: "cuda"   # Use GPU memory for buffer
+# Disable peer-to-peer transfer while we operate without PD acceleration
+enable_pd: False
