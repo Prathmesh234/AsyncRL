@@ -1,0 +1,42 @@
+services:
+    grader-env-1:
+      container_name: grader-env-1
+      build: .
+      image: ${ACR_REGISTRY:-yourregistry}.azurecr.io/grader-env-1:${IMAGE_TAG:-latest}
+      ports:
+        - "8000:8000"      # Proxy server
+        - "8100:8100"      # Prefill vLLM server
+        - "8200:8200"      # Decode vLLM server
+      volumes:
+        - ./logger:/app/logger
+        - ./openai:/app/openai
+      restart: unless-stopped
+      env_file:
+        - .env
+      environment:
+        - ACR_REGISTRY=${ACR_REGISTRY:-yourregistry}
+        - IMAGE_TAG=${IMAGE_TAG:-latest}
+        # LMCache Disaggregated Prefill Configuration:
+        # - GPU 0: Runs prefill server (via start_prefill.sh)
+        # - GPU 1: Runs decode server (via start_decode.sh)
+        # - LMCache shares KV cache between prefill and decode with PD disabled
+        # - Proxy server coordinates between prefill and decode
+        # Commands from Azure Service Bus -> Proxy -> Prefill + Decode -> Response
+        - NVIDIA_VISIBLE_DEVICES=0,1
+        - CUDA_DEVICE_ORDER=PCI_BUS_ID
+        - CUDA_VISIBLE_DEVICES=0,1
+        - PREFILL_GPU=0
+        - DECODE_GPU=1
+      deploy:
+        resources:
+          reservations:
+            devices:
+              - driver: nvidia
+                count: 2  # Expose 2 GPUs to container
+                capabilities: [gpu]
+      # Enable IPC for NVLink communication
+      ipc: host
+      # Required for RDMA/UCX
+      ulimits:
+        memlock: -1
+        stack: 67108864
