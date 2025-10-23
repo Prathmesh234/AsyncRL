@@ -14,7 +14,7 @@ echo "Proxy listening on port: $PROXY_PORT"
 
 cd ..
 uv run disagg_proxy_demo.py \
-    --model ./gpt-oss-20b \
+    --model ./openai/gpt-oss-20b \
     --prefill localhost:$PREFILL_PORT \
     --decode localhost:$DECODE_PORT \
     --port $PROXY_PORT
