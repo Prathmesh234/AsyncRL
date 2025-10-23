@@ -1,4 +1,0 @@
-local_cpu: False
-
-# Disable peer-to-peer transfer while we operate without PD acceleration
-enable_pd: False
