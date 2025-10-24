@@ -16,6 +16,8 @@ load_dotenv()
 print("[PRINT] run_custom_grpo.py importing & preparing dataset")
 
 WANDB_DISABLED_VALUES = {"1", "true", "yes"}
+DEFAULT_TOOL_WANDB_PROJECT = "ToolGRPOTrainer Telemetry"
+DEFAULT_TOOL_WANDB_RUN_NAME = "multi-turn-tool-calling-grpo"
 
 # Multiple reward functions will be combined automatically by the TRL library
 
@@ -69,21 +71,58 @@ dataset = Dataset.from_list([
     {"prompt": f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n<|im_start|>user\n{t}<|im_end|>\n<|im_start|>assistant\n"} for t in USER_TASKS
 ])
 
-# Use ToolGRPOTrainer-specific wandb configuration
+# Weights & Biases configuration (match baseline GRPO setup with optional overrides)
 tool_grpo_api_key = os.getenv("TOOL_GRPO_WANDB_API_KEY")
-tool_grpo_project = os.getenv("TOOL_GRPO_WANDB_PROJECT", "ToolGRPOTrainer Telemetry")
-tool_grpo_run_name = os.getenv("TOOL_GRPO_WANDB_RUN_NAME", "multi-turn-tool-calling-grpo")
-
-wandb_enabled = os.getenv("WANDB_DISABLED", "").strip().lower() not in WANDB_DISABLED_VALUES and tool_grpo_api_key is not None
-report_to = "wandb" if wandb_enabled else None
-
-# Set ToolGRPOTrainer-specific wandb environment variables for the training
-if wandb_enabled:
+if tool_grpo_api_key:
     os.environ["WANDB_API_KEY"] = tool_grpo_api_key
-    os.environ["WANDB_PROJECT"] = tool_grpo_project
-    print(f"[PRINT] ToolGRPOTrainer WANDB logging enabled -> project={tool_grpo_project}")
+
+tool_grpo_project = os.getenv("TOOL_GRPO_WANDB_PROJECT")
+tool_grpo_run_name = os.getenv("TOOL_GRPO_WANDB_RUN_NAME")
+tool_grpo_entity = os.getenv("TOOL_GRPO_WANDB_ENTITY")
+
+wandb_disabled_flag = os.getenv("WANDB_DISABLED", "").strip().lower()
+wandb_enabled = wandb_disabled_flag not in WANDB_DISABLED_VALUES
+
+wandb_project = os.getenv("WANDB_PROJECT")
+if not wandb_project:
+    wandb_project = tool_grpo_project or DEFAULT_TOOL_WANDB_PROJECT
+    os.environ["WANDB_PROJECT"] = wandb_project
+
+wandb_run_name = os.getenv("WANDB_RUN_NAME")
+if not wandb_run_name:
+    wandb_run_name = tool_grpo_run_name or DEFAULT_TOOL_WANDB_RUN_NAME
+    os.environ["WANDB_RUN_NAME"] = wandb_run_name
+
+wandb_entity = os.getenv("WANDB_ENTITY")
+if not wandb_entity and tool_grpo_entity:
+    wandb_entity = tool_grpo_entity
+    os.environ["WANDB_ENTITY"] = wandb_entity
+
+if wandb_enabled:
+    try:
+        import wandb
+    except ImportError:
+        wandb = None
+    if wandb is None:
+        print("[PRINT][WARN] wandb package not installed; disabling logging.")
+        wandb_enabled = False
+    else:
+        if not os.getenv("WANDB_API_KEY"):
+            print("[PRINT][WARN] WANDB_API_KEY not set — logging may fail.")
+        wandb.init(
+            project=wandb_project,
+            name=wandb_run_name,
+            entity=wandb_entity,
+            sync_tensorboard=True,
+            save_code=True,
+        )
+        print(
+            f"[PRINT] ToolGRPOTrainer WANDB logging enabled -> project={wandb_project} run={wandb_run_name}"
+        )
 else:
-    print("[PRINT] ToolGRPOTrainer WANDB logging disabled (no API key or WANDB_DISABLED flag set)")
+    print("[PRINT] ToolGRPOTrainer WANDB logging disabled via WANDB_DISABLED or missing config")
+
+report_to = "wandb" if wandb_enabled else "none"
 
 print(f"[PRINT] Dataset size={len(dataset)} example_prompt=\n{dataset[0]['prompt'][:300]!r}")
 
@@ -96,11 +135,12 @@ training_args = GRPOConfig(
     learning_rate=5e-6,
     gradient_checkpointing=True,
     bf16=True,
+    max_completion_length=10000,
     report_to=report_to,
     log_completions=wandb_enabled,
     wandb_log_unique_prompts=wandb_enabled,
     num_completions_to_print=4 if wandb_enabled else 0,
-    run_name=tool_grpo_run_name if wandb_enabled else None,
+    run_name=wandb_run_name if wandb_enabled else None,
 )
 print("[PRINT] Training args ready")
 
