@@ -7,7 +7,6 @@ from custom_grpo import ToolCallingGRPOTrainer
 from reward_fn.tool_reward import tool_reward_fn
 from reward_fn.char_reward import char_reward_fn
 from reward_fn.format_reward import format_reward_fn
-from reward_fn.external_judge_reward import external_judge_reward_fn
 from reward_fn.grader_reward import grader_reward_fn
 from dotenv import load_dotenv
 
@@ -138,7 +137,7 @@ trainer = ToolCallingGRPOTrainer(
     peft_config=peft_config,  # Additional LoRA for tool calling
     train_dataset=dataset,
     args=training_args,
-    reward_funcs=[tool_reward_fn, char_reward_fn, format_reward_fn, external_judge_reward_fn, grader_reward_fn],
+    reward_funcs=[tool_reward_fn, char_reward_fn, format_reward_fn, grader_reward_fn],
 )
 print("[PRINT] Trainer instantiated")
 

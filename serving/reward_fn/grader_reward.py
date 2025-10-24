@@ -1,6 +1,6 @@
 import logging
 import re
-from typing import List, Any
+from typing import List, Any, Optional
 import sys
 import os
 
@@ -62,48 +62,19 @@ def grader_reward_fn(completions: List[Any], prompts: List[str] = None, **kwargs
             logger.debug(f"Prompt: {prompt[:100]}...")
             logger.debug(f"Completion: {content[:100]}...")
 
-            # Send to Grader-2 and get score
+            # Send to Grader-2 and get score (now returns a bare number string like "1", "2", etc.)
             result = send_grader_command(prompt, content, timeout_s=30)
 
-            # Parse the result to extract numeric score
             reward_score = 0.0
-            if "[grader-score]" in result:
-                # Extract the numeric score from the result
-                score_str = result.replace("[grader-score]", "").strip()
-                try:
-                    # Grader-2 returns scores from 1-5, normalize to 0.0-1.0
-                    raw_score = float(score_str)
-                    # Normalize: 1->0.0, 2->0.25, 3->0.5, 4->0.75, 5->1.0
-                    reward_score = (raw_score - 1.0) / 4.0
-                    logger.info(f"Grader-2 score for completion {i}: {raw_score} (normalized: {reward_score:.3f})")
-                except ValueError:
-                    logger.error(f"Failed to parse grader score: {score_str}")
-                    reward_score = 0.0
-            elif "[grader-result]" in result:
-                # Try to extract score from JSON result
-                try:
-                    import json
-                    result_json = result.replace("[grader-result]", "").strip()
-                    parsed = json.loads(result_json)
-                    raw_score = float(parsed.get("message", 0))
-                    reward_score = (raw_score - 1.0) / 4.0
-                    logger.info(f"Grader-2 score for completion {i}: {raw_score} (normalized: {reward_score:.3f})")
-                except Exception as e:
-                    logger.error(f"Failed to parse grader result: {e}")
-                    reward_score = 0.0
-            elif "[grader-error]" in result:
-                logger.error(f"Grader-2 error for completion {i}: {result}")
-                reward_score = 0.0
+            raw_score = _extract_raw_score(result)
+
+            if raw_score is not None:
+                reward_score = _normalize_score(raw_score)
+                logger.info(
+                    f"Grader-2 score for completion {i}: {raw_score} (normalized: {reward_score:.3f})"
+                )
             else:
-                # Try to extract any number from the result
-                match = re.search(r'\d+\.?\d*', result)
-                if match:
-                    raw_score = float(match.group())
-                    reward_score = (raw_score - 1.0) / 4.0
-                    logger.info(f"Extracted grader score for completion {i}: {raw_score} (normalized: {reward_score:.3f})")
-                else:
-                    logger.warning(f"Could not extract score from grader result: {result}")
-                    reward_score = 0.0
+                logger.warning(f"Could not extract score from grader result: {result}")
 
             rewards.append(reward_score)
             logger.info(f"Completion {i} grader reward: {reward_score:.3f}")
@@ -114,3 +85,40 @@ def grader_reward_fn(completions: List[Any], prompts: List[str] = None, **kwargs
 
     logger.info(f"Grader rewards: {[f'{r:.3f}' for r in rewards]}")
     return rewards
+
+
+def _extract_raw_score(result: Any) -> Optional[float]:
+    """Attempt to coerce the grader result into a numeric score."""
+    if result is None:
+        return None
+
+    text = str(result).strip()
+    if not text:
+        return None
+
+    score = _try_parse_float(text)
+    if score is not None:
+        return score
+
+    match = re.search(r"\d+\.?\d*", text)
+    if match:
+        return _try_parse_float(match.group())
+
+    return None
+
+
+def _try_parse_float(value: Any) -> Optional[float]:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_score(raw_score: float) -> float:
+    """Map the 1-5 grader score onto the [0, 1] interval."""
+    normalized = (raw_score - 1.0) / 4.0
+    if normalized < 0.0:
+        return 0.0
+    if normalized > 1.0:
+        return 1.0
+    return normalized
