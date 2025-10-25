@@ -5,7 +5,7 @@ import logging
 from typing import Any, Dict
 from uuid import uuid4
 from dotenv import load_dotenv
-from servicebus_web import ServiceBusTopicWeb
+from servicebus_web import ServiceBusTopic
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ def send_azure_command(payload: Dict[str, Any], timeout_s: int = 10) -> str:
     message = {"type": payload_type, "azure_command": command}
 
     try:
-        with ServiceBusTopicWeb(SERVICE_BUS_CONNECTION_STRING, topic_name=WEB_TOPIC_NAME, subscription_name=SUBSCRIPTION_NAME) as web_topic:
+        with ServiceBusTopic(SERVICE_BUS_CONNECTION_STRING, topic_name=WEB_TOPIC_NAME, subscription_name=SUBSCRIPTION_NAME) as web_topic:
             ok = web_topic.send_web_result(
                 message,
                 message_id=message_id,
@@ -46,7 +46,7 @@ def send_azure_command(payload: Dict[str, Any], timeout_s: int = 10) -> str:
     async def _wait_for_response():
         for _ in range(timeout_s):
             try:
-                reward_topic = ServiceBusTopicWeb(SERVICE_BUS_CONNECTION_STRING, topic_name=REWARD_TOPIC_NAME, subscription_name=SUBSCRIPTION_NAME)
+                reward_topic = ServiceBusTopic(SERVICE_BUS_CONNECTION_STRING, topic_name=REWARD_TOPIC_NAME, subscription_name=SUBSCRIPTION_NAME)
                 resp = await reward_topic.receive_web_reward_async()
                 if resp and resp.get("message") not in {"No rewards received", "No messages received"}:
                     return resp
