@@ -1,324 +1,437 @@
-INFO:     Started server process [4217]
+INFO:     Started server process [8066]
 INFO:     Waiting for application startup.
-2025-10-24 23:59:04,988 INFO [startup] Initializing command and reward queues...
-2025-10-24 23:59:04,988 INFO [startup] Connected to disaggregated proxy at http://localhost:8000
-2025-10-24 23:59:04,989 INFO [startup] System ready for grading requests.
+2025-10-26 19:54:29,986 INFO [startup] Initializing command and reward queues...
+2025-10-26 19:54:29,986 INFO [startup] Connected to disaggregated proxy at http://localhost:8000
+2025-10-26 19:54:29,987 INFO [startup] System ready for grading requests.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8080 (Press CTRL+C to quit)
-2025-10-24 23:59:06,010 INFO request accepted by grader tool
-2025-10-24 23:59:06,045 INFO request accepted by grader tool
-2025-10-24 23:59:06,216 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:16:33,074 INFO request accepted by grader tool
+2025-10-26 20:16:33,253 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-24 23:59:06,216 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-24 23:59:06,237 ERROR [grader_tool] Unexpected error during grading: Expecting value: line 1 column 1 (char 0)
-Traceback (most recent call last):
-  File "/lambda/nfs/rl-env-north-texas/AsyncRL/Grader-1/src/main.py", line 211, in run_grading
-    result = response.json()
-  File "/lambda/nfs/rl-env-north-texas/AsyncRL/Grader-1/.venv/lib/python3.10/site-packages/httpx/_models.py", line 832, in json
-    return jsonlib.loads(self.content, **kwargs)
-  File "/usr/lib/python3.10/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-  File "/usr/lib/python3.10/json/decoder.py", line 337, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-  File "/usr/lib/python3.10/json/decoder.py", line 355, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
-2025-10-25 00:12:34,463 INFO Not grader_command, ignored
-2025-10-25 00:12:40,619 INFO request accepted by grader tool
-2025-10-25 00:12:41,021 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:16:33,253 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:16:35,156 INFO [grader_tool] Final score: 1
+2025-10-26 20:16:35,156 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:16:36,441 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:16:37,552 INFO request accepted by grader tool
+2025-10-26 20:16:37,940 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:12:41,021 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:12:42,379 INFO [grader_tool] Final score: 1
-2025-10-25 00:12:42,380 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:12:43,663 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:12:44,732 INFO request accepted by grader tool
-2025-10-25 00:12:45,164 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:16:37,940 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:16:39,002 INFO [grader_tool] Final score: 1
+2025-10-26 20:16:39,002 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:16:40,267 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:16:41,067 INFO request accepted by grader tool
+2025-10-26 20:16:41,267 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:12:45,164 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:12:46,787 INFO [grader_tool] Final score: 1
-2025-10-25 00:12:46,787 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:12:48,062 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:12:49,801 INFO request accepted by grader tool
-2025-10-25 00:12:50,062 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:16:41,267 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:16:42,424 INFO [grader_tool] Final score: 1
+2025-10-26 20:16:42,424 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:16:43,686 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:16:44,689 INFO request accepted by grader tool
+2025-10-26 20:16:45,188 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:12:50,062 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:12:51,177 INFO [grader_tool] Final score: 1
-2025-10-25 00:12:51,177 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:12:52,461 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:12:53,852 INFO request accepted by grader tool
-2025-10-25 00:12:53,962 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:16:45,188 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:16:46,192 INFO [grader_tool] Final score: 1
+2025-10-26 20:16:46,192 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:16:47,464 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:17:45,190 INFO request accepted by grader tool
+2025-10-26 20:17:45,479 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:12:53,962 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:12:55,581 INFO [grader_tool] Final score: 1
-2025-10-25 00:12:55,581 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:12:56,843 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:13:21,125 INFO Not grader_command, ignored
-2025-10-25 00:14:20,320 INFO Not grader_command, ignored
-2025-10-25 00:14:24,751 INFO request accepted by grader tool
-2025-10-25 00:14:24,876 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:17:45,479 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:17:46,730 INFO [grader_tool] Final score: 1
+2025-10-26 20:17:46,730 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:17:48,039 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:17:48,709 INFO request accepted by grader tool
+2025-10-26 20:17:49,039 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:14:24,876 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:14:26,921 INFO [grader_tool] Final score: 2
-2025-10-25 00:14:26,922 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:14:28,200 INFO [grader_tool] Score 2 sent to reward queue
-2025-10-25 00:14:30,489 INFO request accepted by grader tool
-2025-10-25 00:14:30,701 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:17:49,039 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:17:51,952 INFO [grader_tool] Final score: 1
+2025-10-26 20:17:51,953 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:17:53,215 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:17:54,170 INFO request accepted by grader tool
+2025-10-26 20:17:54,215 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:14:30,701 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:14:31,826 INFO [grader_tool] Final score: 1
-2025-10-25 00:14:31,826 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:14:33,091 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:14:34,802 INFO request accepted by grader tool
-2025-10-25 00:14:35,091 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:17:54,215 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:17:55,458 INFO [grader_tool] Final score: 1
+2025-10-26 20:17:55,458 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:17:56,720 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:17:57,649 INFO request accepted by grader tool
+2025-10-26 20:17:57,720 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:14:35,091 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:14:36,195 INFO [grader_tool] Final score: 1
-2025-10-25 00:14:36,195 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:14:37,468 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:14:38,896 INFO request accepted by grader tool
-2025-10-25 00:14:38,970 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:17:57,720 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:17:58,783 INFO [grader_tool] Final score: 1
+2025-10-26 20:17:58,784 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:18:00,056 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:19:09,226 INFO request accepted by grader tool
+2025-10-26 20:19:09,596 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:14:38,970 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:14:40,208 INFO [grader_tool] Final score: 1
-2025-10-25 00:14:40,208 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:14:41,483 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:15:40,707 INFO Not grader_command, ignored
-2025-10-25 00:16:06,526 INFO request accepted by grader tool
-2025-10-25 00:16:07,026 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:19:09,596 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:19:10,401 INFO [grader_tool] Final score: 1
+2025-10-26 20:19:10,402 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:19:11,686 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:19:12,750 INFO request accepted by grader tool
+2025-10-26 20:19:13,186 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:16:07,026 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:16:08,194 INFO [grader_tool] Final score: 1
-2025-10-25 00:16:08,194 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:16:09,465 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:16:10,586 INFO request accepted by grader tool
-2025-10-25 00:16:10,967 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:19:13,186 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:19:13,646 INFO [grader_tool] Final score: 1
+2025-10-26 20:19:13,646 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:19:14,906 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:19:16,258 INFO request accepted by grader tool
+2025-10-26 20:19:16,406 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:16:10,967 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:16:11,364 INFO [grader_tool] Final score: 1
-2025-10-25 00:16:11,365 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:16:12,628 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:16:14,588 INFO request accepted by grader tool
-2025-10-25 00:16:14,628 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:19:16,406 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:19:17,115 INFO [grader_tool] Final score: 1
+2025-10-26 20:19:17,116 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:19:18,378 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:19:19,759 INFO request accepted by grader tool
+2025-10-26 20:19:19,880 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:16:14,628 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:16:17,263 INFO [grader_tool] Final score: 2
-2025-10-25 00:16:17,263 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:16:18,535 INFO [grader_tool] Score 2 sent to reward queue
-2025-10-25 00:16:20,591 INFO request accepted by grader tool
-2025-10-25 00:16:21,035 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:19:19,880 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:19:20,508 INFO [grader_tool] Final score: 1
+2025-10-26 20:19:20,508 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:19:21,814 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:20:18,358 INFO request accepted by grader tool
+2025-10-26 20:20:18,832 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:16:21,035 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:16:22,143 INFO [grader_tool] Final score: 1
-2025-10-25 00:16:22,143 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:16:23,419 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:16:48,221 INFO Not grader_command, ignored
-2025-10-25 00:17:46,575 INFO request accepted by grader tool
-2025-10-25 00:17:46,937 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:20:18,832 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:20:20,042 INFO [grader_tool] Final score: 1
+2025-10-26 20:20:20,042 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:20:21,438 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:20:21,842 INFO request accepted by grader tool
+2025-10-26 20:20:21,939 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:17:46,937 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:17:49,176 INFO [grader_tool] Final score: 2
-2025-10-25 00:17:49,176 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:17:50,465 INFO [grader_tool] Score 2 sent to reward queue
-2025-10-25 00:17:51,573 INFO request accepted by grader tool
-2025-10-25 00:17:51,965 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:20:21,939 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:20:23,079 INFO [grader_tool] Final score: 1
+2025-10-26 20:20:23,079 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:20:24,342 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:20:25,371 INFO request accepted by grader tool
+2025-10-26 20:20:25,844 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:17:51,965 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:17:53,152 INFO [grader_tool] Final score: 1
-2025-10-25 00:17:53,153 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:17:54,416 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:17:55,661 INFO request accepted by grader tool
-2025-10-25 00:17:55,917 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:20:25,844 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:20:26,623 INFO [grader_tool] Final score: 1
+2025-10-26 20:20:26,623 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:20:27,898 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:20:28,845 INFO request accepted by grader tool
+2025-10-26 20:20:28,899 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:17:55,917 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:17:57,612 INFO [grader_tool] Final score: 5
-2025-10-25 00:17:57,612 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:17:58,898 INFO [grader_tool] Score 5 sent to reward queue
-2025-10-25 00:17:59,707 INFO request accepted by grader tool
-2025-10-25 00:17:59,898 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:20:28,899 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:20:30,152 INFO [grader_tool] Final score: 2
+2025-10-26 20:20:30,153 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:20:31,422 INFO [grader_tool] Score 2 sent to reward queue
+2025-10-26 20:21:28,324 INFO request accepted by grader tool
+2025-10-26 20:21:28,437 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:17:59,898 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:18:00,956 INFO [grader_tool] Final score: 1
-2025-10-25 00:18:00,956 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:18:02,223 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:19:02,632 INFO Not grader_command, ignored
-2025-10-25 00:19:27,408 INFO request accepted by grader tool
-2025-10-25 00:19:27,766 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:21:28,437 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:21:29,831 INFO [grader_tool] Final score: 1
+2025-10-26 20:21:29,831 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:21:31,113 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:21:31,811 INFO request accepted by grader tool
+2025-10-26 20:21:32,113 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:19:27,766 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:19:29,431 INFO [grader_tool] Final score: 1
-2025-10-25 00:19:29,431 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:19:30,702 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:19:33,410 INFO request accepted by grader tool
-2025-10-25 00:19:33,701 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:21:32,113 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:21:33,402 INFO [grader_tool] Final score: 1
+2025-10-26 20:21:33,402 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:21:34,666 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:21:35,284 INFO request accepted by grader tool
+2025-10-26 20:21:35,668 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:19:33,701 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:19:36,222 INFO [grader_tool] Final score: 1
-2025-10-25 00:19:36,222 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:19:37,493 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:19:38,556 INFO request accepted by grader tool
-2025-10-25 00:19:38,993 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:21:35,669 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:21:36,805 INFO [grader_tool] Final score: 1
+2025-10-26 20:21:36,805 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:21:38,065 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:21:39,285 INFO request accepted by grader tool
+2025-10-26 20:21:39,567 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:19:38,993 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:19:41,416 INFO [grader_tool] Final score: 2
-2025-10-25 00:19:41,416 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:19:42,681 INFO [grader_tool] Score 2 sent to reward queue
-2025-10-25 00:19:43,468 INFO request accepted by grader tool
-2025-10-25 00:19:43,681 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:21:39,567 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:21:40,499 INFO [grader_tool] Final score: 1
+2025-10-26 20:21:40,499 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:21:41,764 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:37:04,988 INFO request accepted by grader tool
+2025-10-26 20:37:05,128 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:19:43,682 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:19:46,746 INFO [grader_tool] Final score: 2
-2025-10-25 00:19:46,746 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:19:48,034 INFO [grader_tool] Score 2 sent to reward queue
-2025-10-25 00:20:06,051 INFO Not grader_command, ignored
-2025-10-25 00:21:05,889 INFO request accepted by grader tool
-2025-10-25 00:21:06,055 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:37:05,128 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:37:06,307 INFO [grader_tool] Final score: 1
+2025-10-26 20:37:06,308 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:37:07,581 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:37:08,511 INFO request accepted by grader tool
+2025-10-26 20:37:08,582 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:21:06,055 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:21:07,735 INFO [grader_tool] Final score: 1
-2025-10-25 00:21:07,736 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:21:09,036 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:21:09,874 INFO request accepted by grader tool
-2025-10-25 00:21:10,036 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:37:08,582 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:37:09,237 INFO [grader_tool] Final score: 1
+2025-10-26 20:37:09,237 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:37:10,495 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:37:11,026 INFO request accepted by grader tool
+2025-10-26 20:37:11,497 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:21:10,036 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:21:12,199 INFO [grader_tool] Final score: 1
-2025-10-25 00:21:12,200 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:21:13,457 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:21:14,920 INFO request accepted by grader tool
-2025-10-25 00:21:14,957 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:37:11,497 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:37:12,846 INFO [grader_tool] Final score: 1
+2025-10-26 20:37:12,846 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:37:14,108 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:37:14,546 INFO request accepted by grader tool
+2025-10-26 20:37:14,609 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:21:14,957 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:21:16,155 INFO [grader_tool] Final score: 1
-2025-10-25 00:21:16,155 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:21:17,419 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:21:18,973 INFO request accepted by grader tool
-2025-10-25 00:21:19,419 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:37:14,609 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:37:15,729 INFO [grader_tool] Final score: 1
+2025-10-26 20:37:15,729 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:37:17,010 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:45:01,345 INFO request accepted by grader tool
+2025-10-26 20:45:01,678 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:21:19,419 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:21:20,386 INFO [grader_tool] Final score: 1
-2025-10-25 00:21:20,387 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:21:21,668 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:21:43,069 INFO Not grader_command, ignored
-2025-10-25 00:22:43,265 INFO request accepted by grader tool
-2025-10-25 00:22:43,709 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:45:01,678 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:45:02,893 INFO [grader_tool] Final score: 1
+2025-10-26 20:45:02,893 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:45:04,169 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:45:04,898 INFO request accepted by grader tool
+2025-10-26 20:45:05,169 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:22:43,709 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:22:45,833 INFO [grader_tool] Final score: 5
-2025-10-25 00:22:45,833 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:22:47,107 INFO [grader_tool] Score 5 sent to reward queue
-2025-10-25 00:22:48,295 INFO request accepted by grader tool
-2025-10-25 00:22:48,608 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:45:05,170 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:45:06,459 INFO [grader_tool] Final score: 1
+2025-10-26 20:45:06,460 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:45:07,722 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:45:08,332 INFO request accepted by grader tool
+2025-10-26 20:45:08,722 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:22:48,608 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:22:50,179 INFO [grader_tool] Final score: 1
-2025-10-25 00:22:50,179 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:22:51,437 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:22:52,436 INFO request accepted by grader tool
-2025-10-25 00:22:52,438 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:45:08,722 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:45:10,250 INFO [grader_tool] Final score: 1
+2025-10-26 20:45:10,251 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:45:11,522 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:45:12,848 INFO request accepted by grader tool
+2025-10-26 20:45:13,023 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:22:52,438 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:22:54,490 INFO [grader_tool] Final score: 2
-2025-10-25 00:22:54,491 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:22:55,751 INFO [grader_tool] Score 2 sent to reward queue
-2025-10-25 00:22:57,462 INFO request accepted by grader tool
-2025-10-25 00:22:57,752 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:45:13,023 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:45:15,620 INFO [grader_tool] Final score: 2
+2025-10-26 20:45:15,620 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:45:16,886 INFO [grader_tool] Score 2 sent to reward queue
+2025-10-26 20:53:08,743 INFO request accepted by grader tool
+2025-10-26 20:53:09,093 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:22:57,752 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:22:58,741 INFO [grader_tool] Final score: 1
-2025-10-25 00:22:58,741 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:23:00,011 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:23:41,255 INFO Not grader_command, ignored
-2025-10-25 00:24:22,651 INFO request accepted by grader tool
-2025-10-25 00:24:23,030 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:53:09,093 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:53:10,200 INFO [grader_tool] Final score: 1
+2025-10-26 20:53:10,200 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:53:11,473 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:53:12,439 INFO request accepted by grader tool
+2025-10-26 20:53:12,473 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:24:23,031 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:24:25,112 INFO [grader_tool] Final score: 5
-2025-10-25 00:24:25,112 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:24:26,386 INFO [grader_tool] Score 5 sent to reward queue
-2025-10-25 00:24:27,746 INFO request accepted by grader tool
-2025-10-25 00:24:27,886 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:53:12,474 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:53:13,579 INFO [grader_tool] Final score: 1
+2025-10-26 20:53:13,580 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:53:14,856 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 20:53:15,983 INFO request accepted by grader tool
+2025-10-26 20:53:16,356 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:24:27,886 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:24:29,235 INFO [grader_tool] Final score: 1
-2025-10-25 00:24:29,236 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:24:30,498 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:24:31,713 INFO request accepted by grader tool
-2025-10-25 00:24:32,000 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:53:16,357 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:53:17,882 INFO [grader_tool] Final score: 2
+2025-10-26 20:53:17,882 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:53:19,157 INFO [grader_tool] Score 2 sent to reward queue
+2025-10-26 20:53:20,481 INFO request accepted by grader tool
+2025-10-26 20:53:20,657 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:24:32,000 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:24:33,216 INFO [grader_tool] Final score: 1
-2025-10-25 00:24:33,217 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:24:34,481 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:24:36,713 INFO request accepted by grader tool
-2025-10-25 00:24:36,982 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 20:53:20,657 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 20:53:21,572 INFO [grader_tool] Final score: 1
+2025-10-26 20:53:21,572 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 20:53:22,835 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 21:01:07,009 INFO request accepted by grader tool
+2025-10-26 21:01:07,037 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:24:36,982 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:24:38,383 INFO [grader_tool] Final score: 1
-2025-10-25 00:24:38,383 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:24:39,652 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:25:24,808 INFO Not grader_command, ignored
-2025-10-25 00:25:47,812 INFO Not grader_command, ignored
-2025-10-25 00:26:07,454 INFO Not grader_command, ignored
-2025-10-25 00:26:12,653 INFO request accepted by grader tool
-2025-10-25 00:26:12,697 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 21:01:07,037 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:01:08,308 INFO [grader_tool] Final score: 1
+2025-10-26 21:01:08,309 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:01:09,583 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 21:01:10,196 INFO request accepted by grader tool
+2025-10-26 21:01:10,585 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:26:12,697 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:26:13,820 INFO [grader_tool] Final score: 1
-2025-10-25 00:26:13,820 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:26:15,099 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:26:16,697 INFO request accepted by grader tool
-2025-10-25 00:26:17,100 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 21:01:10,585 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:01:11,770 INFO [grader_tool] Final score: 1
+2025-10-26 21:01:11,770 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:01:13,029 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 21:01:13,749 INFO request accepted by grader tool
+2025-10-26 21:01:14,029 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:26:17,100 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:26:19,368 INFO [grader_tool] Final score: 1
-2025-10-25 00:26:19,368 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:26:20,638 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:26:21,732 INFO request accepted by grader tool
-2025-10-25 00:26:22,140 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 21:01:14,029 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:01:15,695 INFO [grader_tool] Final score: 1
+2025-10-26 21:01:15,696 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:01:16,957 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 21:01:18,211 INFO request accepted by grader tool
+2025-10-26 21:01:18,458 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:26:22,140 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:26:24,510 INFO [grader_tool] Final score: 2
-2025-10-25 00:26:24,510 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:26:25,771 INFO [grader_tool] Score 2 sent to reward queue
-2025-10-25 00:26:26,845 INFO request accepted by grader tool
-2025-10-25 00:26:27,271 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 21:01:18,458 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:01:19,855 INFO [grader_tool] Final score: 2
+2025-10-26 21:01:19,856 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:01:21,118 INFO [grader_tool] Score 2 sent to reward queue
+2025-10-26 21:09:03,351 INFO request accepted by grader tool
+2025-10-26 21:09:03,812 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:26:27,272 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:26:29,389 INFO [grader_tool] Final score: 1
-2025-10-25 00:26:29,389 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:26:30,648 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:26:47,317 INFO Not grader_command, ignored
-2025-10-25 00:27:05,490 INFO Not grader_command, ignored
-2025-10-25 00:27:47,689 INFO request accepted by grader tool
-2025-10-25 00:27:48,179 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 21:09:03,812 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:09:06,328 INFO [grader_tool] Final score: 2
+2025-10-26 21:09:06,328 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:09:07,605 INFO [grader_tool] Score 2 sent to reward queue
+2025-10-26 21:09:08,863 INFO request accepted by grader tool
+2025-10-26 21:09:09,105 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:27:48,180 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:27:49,828 INFO [grader_tool] Final score: 1
-2025-10-25 00:27:49,828 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:27:51,115 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:27:52,725 INFO request accepted by grader tool
-2025-10-25 00:27:53,115 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 21:09:09,105 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:09:10,407 INFO [grader_tool] Final score: 1
+2025-10-26 21:09:10,407 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:09:11,671 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 21:09:12,362 INFO request accepted by grader tool
+2025-10-26 21:09:12,672 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:27:53,115 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:27:55,621 INFO [grader_tool] Final score: 1
-2025-10-25 00:27:55,621 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:27:56,886 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:27:58,690 INFO request accepted by grader tool
-2025-10-25 00:27:58,886 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 21:09:12,672 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:09:14,682 INFO [grader_tool] Final score: 2
+2025-10-26 21:09:14,683 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:09:15,943 INFO [grader_tool] Score 2 sent to reward queue
+2025-10-26 21:09:16,977 INFO request accepted by grader tool
+2025-10-26 21:09:17,443 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:27:58,886 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:28:00,845 INFO [grader_tool] Final score: 1
-2025-10-25 00:28:00,845 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:28:02,106 INFO [grader_tool] Score 1 sent to reward queue
-2025-10-25 00:28:03,755 INFO request accepted by grader tool
-2025-10-25 00:28:04,106 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+2025-10-26 21:09:17,443 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:09:18,633 INFO [grader_tool] Final score: 1
+2025-10-26 21:09:18,634 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:09:19,901 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 21:12:57,444 INFO Not grader_command, ignored
+2025-10-26 21:16:48,160 INFO Not grader_command, ignored
+2025-10-26 21:16:52,690 INFO request accepted by grader tool
+2025-10-26 21:16:53,091 INFO [grader_tool] Starting grading for query: '<|im_start|>system
 You are an ORCHESTRATOR/CODING ...'
-2025-10-25 00:28:04,106 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
-2025-10-25 00:28:05,579 INFO [grader_tool] Final score: 5
-2025-10-25 00:28:05,579 INFO [reward_topic] sending to topic 'rewardtopic'
-2025-10-25 00:28:06,839 INFO [grader_tool] Score 5 sent to reward queue
+2025-10-26 21:16:53,091 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:16:54,172 INFO [grader_tool] Final score: 1
+2025-10-26 21:16:54,172 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:16:55,447 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 21:16:56,191 INFO request accepted by grader tool
+2025-10-26 21:16:56,449 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+You are an ORCHESTRATOR/CODING ...'
+2025-10-26 21:16:56,449 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:16:58,021 INFO [grader_tool] Final score: 2
+2025-10-26 21:16:58,021 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:16:59,284 INFO [grader_tool] Score 2 sent to reward queue
+2025-10-26 21:17:00,825 INFO request accepted by grader tool
+2025-10-26 21:17:01,285 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+You are an ORCHESTRATOR/CODING ...'
+2025-10-26 21:17:01,285 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:17:02,438 INFO [grader_tool] Final score: 1
+2025-10-26 21:17:02,439 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:17:03,702 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 21:17:04,358 INFO request accepted by grader tool
+2025-10-26 21:17:04,701 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+You are an ORCHESTRATOR/CODING ...'
+2025-10-26 21:17:04,701 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:17:06,151 INFO [grader_tool] Final score: 1
+2025-10-26 21:17:06,151 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:17:07,419 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 21:21:37,410 INFO Not grader_command, ignored
+2025-10-26 21:23:08,951 INFO Not grader_command, ignored
+2025-10-26 21:25:26,949 INFO request accepted by grader tool
+2025-10-26 21:25:27,127 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+You are an ORCHESTRATOR/CODING ...'
+2025-10-26 21:25:27,127 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:25:28,292 INFO [grader_tool] Final score: 2
+2025-10-26 21:25:28,292 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:25:29,582 INFO [grader_tool] Score 2 sent to reward queue
+2025-10-26 21:25:30,950 INFO request accepted by grader tool
+2025-10-26 21:25:31,082 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+You are an ORCHESTRATOR/CODING ...'
+2025-10-26 21:25:31,082 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:25:33,112 INFO [grader_tool] Final score: 2
+2025-10-26 21:25:33,112 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:25:34,381 INFO [grader_tool] Score 2 sent to reward queue
+2025-10-26 21:25:34,987 INFO request accepted by grader tool
+2025-10-26 21:25:35,382 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+You are an ORCHESTRATOR/CODING ...'
+2025-10-26 21:25:35,382 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:25:36,899 INFO [grader_tool] Final score: 3
+2025-10-26 21:25:36,900 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:25:38,157 INFO [grader_tool] Score 3 sent to reward queue
+2025-10-26 21:25:39,446 INFO request accepted by grader tool
+2025-10-26 21:25:39,657 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+You are an ORCHESTRATOR/CODING ...'
+2025-10-26 21:25:39,657 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:25:40,697 INFO [grader_tool] Final score: 1
+2025-10-26 21:25:40,697 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:25:41,974 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 21:34:25,131 INFO Not grader_command, ignored
+2025-10-26 21:38:37,714 INFO request accepted by grader tool
+2025-10-26 21:38:37,785 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+You are an ORCHESTRATOR/CODING ...'
+2025-10-26 21:38:37,785 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:38:39,634 INFO [grader_tool] Final score: 1
+2025-10-26 21:38:39,634 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:38:40,911 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 21:38:42,278 INFO request accepted by grader tool
+2025-10-26 21:38:42,411 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+You are an ORCHESTRATOR/CODING ...'
+2025-10-26 21:38:42,411 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:38:44,365 INFO [grader_tool] Final score: 1
+2025-10-26 21:38:44,366 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:38:45,630 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 21:38:46,728 INFO request accepted by grader tool
+2025-10-26 21:38:47,133 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+You are an ORCHESTRATOR/CODING ...'
+2025-10-26 21:38:47,133 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:38:48,414 INFO [grader_tool] Final score: 2
+2025-10-26 21:38:48,414 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:38:49,676 INFO [grader_tool] Score 2 sent to reward queue
+2025-10-26 21:38:50,233 INFO request accepted by grader tool
+2025-10-26 21:38:50,676 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+You are an ORCHESTRATOR/CODING ...'
+2025-10-26 21:38:50,676 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:38:51,463 INFO [grader_tool] Final score: 1
+2025-10-26 21:38:51,463 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:38:52,729 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 21:46:35,340 INFO request accepted by grader tool
+2025-10-26 21:46:35,407 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+You are an ORCHESTRATOR/CODING ...'
+2025-10-26 21:46:35,407 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:46:37,127 INFO [grader_tool] Final score: 1
+2025-10-26 21:46:37,127 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:46:38,400 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 21:46:39,794 INFO request accepted by grader tool
+2025-10-26 21:46:39,902 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+You are an ORCHESTRATOR/CODING ...'
+2025-10-26 21:46:39,902 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:46:41,316 INFO [grader_tool] Final score: 1
+2025-10-26 21:46:41,316 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:46:42,575 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 21:46:43,279 INFO request accepted by grader tool
+2025-10-26 21:46:43,575 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+You are an ORCHESTRATOR/CODING ...'
+2025-10-26 21:46:43,575 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:46:45,591 INFO [grader_tool] Final score: 2
+2025-10-26 21:46:45,591 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:46:46,877 INFO [grader_tool] Score 2 sent to reward queue
+2025-10-26 21:46:47,815 INFO request accepted by grader tool
+2025-10-26 21:46:47,878 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+You are an ORCHESTRATOR/CODING ...'
+2025-10-26 21:46:47,878 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:46:49,485 INFO [grader_tool] Final score: 1
+2025-10-26 21:46:49,485 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:46:50,749 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 21:54:32,465 INFO request accepted by grader tool
+2025-10-26 21:54:32,942 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+You are an ORCHESTRATOR/CODING ...'
+2025-10-26 21:54:32,942 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:54:34,624 INFO [grader_tool] Final score: 1
+2025-10-26 21:54:34,624 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:54:35,900 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 21:54:36,971 INFO request accepted by grader tool
+2025-10-26 21:54:37,400 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+You are an ORCHESTRATOR/CODING ...'
+2025-10-26 21:54:37,400 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:54:38,478 INFO [grader_tool] Final score: 1
+2025-10-26 21:54:38,478 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:54:39,740 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 21:54:40,430 INFO request accepted by grader tool
+2025-10-26 21:54:40,741 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+You are an ORCHESTRATOR/CODING ...'
+2025-10-26 21:54:40,741 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:54:41,886 INFO [grader_tool] Final score: 1
+2025-10-26 21:54:41,886 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:54:43,149 INFO [grader_tool] Score 1 sent to reward queue
+2025-10-26 21:54:43,912 INFO request accepted by grader tool
+2025-10-26 21:54:44,149 INFO [grader_tool] Starting grading for query: '<|im_start|>system
+You are an ORCHESTRATOR/CODING ...'
+2025-10-26 21:54:44,149 INFO [grader_tool] Sending request to disaggregated proxy at http://localhost:8000
+2025-10-26 21:54:45,361 INFO [grader_tool] Final score: 1
+2025-10-26 21:54:45,361 INFO [reward_topic] sending to topic 'rewardtopic'
+2025-10-26 21:54:46,633 INFO [grader_tool] Score 1 sent to reward queue
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
-2025-10-25 00:33:00,677 INFO [shutdown] All services stopped.
+2025-10-26 21:56:48,210 INFO [shutdown] All services stopped.
 INFO:     Application shutdown complete.
-INFO:     Finished server process [4217]
+INFO:     Finished server process [8066]
