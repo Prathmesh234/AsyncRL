@@ -130,7 +130,7 @@ training_args = GRPOConfig(
     output_dir="./grpo-streamed",
     max_steps=10,  # Increased from 3 to 10 for more training steps
     num_generations=4,  # Increased from 2 to 4 generations per prompt
-    per_device_train_batch_size=2,  # Changed from 2 to 4 to be divisible by num_generations
+    per_device_train_batch_size=4,  # Changed from 2 to 4 to be divisible by num_generations
     logging_steps=1,
     learning_rate=5e-6,
     gradient_checkpointing=True,
@@ -163,8 +163,8 @@ print("[PRINT] Instantiating trainer (this will load model)...")
 from transformers import AutoModelForCausalLM
 from peft import PeftModel
 
-base_model_path = "/home/ubuntu/UTAH-GRPO/AsyncRL/grpo-qwen-training/checkpoint-100"  # Latest GRPO checkpoint
-adapter_path = "/home/ubuntu/UTAH-GRPO/AsyncRL/GeneratorFS/qwen3-4b-thinking-openthoughts-lora"  # LoRA adapter
+base_model_path = "/home/ubuntu/rl-env-north-texas/AsyncRL/grpo-qwen-training/checkpoint-100"  # Latest GRPO checkpoint
+adapter_path = "/home/ubuntu/rl-env-north-texas/AsyncRL/GeneratorFS/qwen3-4b-thinking-openthoughts-lora/checkpoint-2280"  # Latest comprehensive tool-use LoRA adapter
 
 print(f"[PRINT] Loading GRPO-trained base model: {base_model_path}")
 model = AutoModelForCausalLM.from_pretrained(base_model_path)
@@ -210,4 +210,5 @@ if not isinstance(trainer.generate_completions, types.MethodType) or "ToolCallin
 print("[PRINT] Starting GRPO training (SIMPLE PRINT DEBUG RUN)...")
 trainer.train()
 
-print("[PRINT] GRPO Training complete - Deleting YOLO Model run")
+print("[PRINT] TOOLGRPOTrainer run complete")
+

@@ -122,7 +122,7 @@ class ToolCallingGRPOTrainer(GRPOTrainer):
     def _step(self, *args, **kwargs):
         return super()._step(*args, **kwargs)
 
-    def _stream_generate_one(self, prompt_text: str, max_turns: int = 6, turn_max_new_tokens: int = 256) -> str:
+    def _stream_generate_one(self, prompt_text: str, max_turns: int = 8, turn_max_new_tokens: int = 1536) -> str:
         """Run multi-turn streaming generation for a single prompt, with multi turn tool calling.
         Returns ONLY the completion portion (excluding the original prompt_text)."""
         print("[GEN] start")  # simple high-level generation start notice
@@ -318,7 +318,7 @@ class ToolCallingGRPOTrainer(GRPOTrainer):
             turns = 0
             repeat_guard_prev_add = None
             repeat_guard_count = 0
-            while not done and turns < 6:
+            while not done and turns < 8:
                 buffer = ""
                 inputs = self.processing_class(text=conversation, return_tensors="pt", add_special_tokens=False)
                 for k in list(inputs.keys()):
@@ -327,7 +327,7 @@ class ToolCallingGRPOTrainer(GRPOTrainer):
                 streamer = TextIteratorStreamer(self.processing_class, skip_prompt=True, skip_special_tokens=True)
                 local_gen_kwargs = dict(
                     **inputs,
-                    max_new_tokens=64,
+                    max_new_tokens=1536,
                     temperature=0.7,
                     do_sample=True,
                     streamer=streamer,

@@ -1,0 +1,40 @@
+{
+  "os":  "Linux-6.8.0-60-generic-x86_64-with-glibc2.35",
+  "python":  "CPython 3.10.12",
+  "startedAt":  "2025-10-26T20:29:16.283275Z",
+  "program":  "/lambda/nfs/rl-env-north-texas/AsyncRL/serving/ToolGRPOTrainer/run_custom_grpo.py",
+  "codePath":  "serving/ToolGRPOTrainer/run_custom_grpo.py",
+  "codePathLocal":  "run_custom_grpo.py",
+  "git":  {
+    "remote":  "https://github.com/Prathmesh234/AsyncRL.git",
+    "commit":  "81bdd8f0c6777dc7ac4f18e16c537392d49f0f25"
+  },
+  "email":  "ppbhatt500@gmail.com",
+  "root":  "/lambda/nfs/rl-env-north-texas/AsyncRL/serving/ToolGRPOTrainer",
+  "host":  "192-222-52-213",
+  "executable":  "/lambda/nfs/rl-env-north-texas/AsyncRL/serving/.venv/bin/python3",
+  "cpu_count":  13,
+  "cpu_count_logical":  26,
+  "gpu":  "NVIDIA H100 80GB HBM3",
+  "gpu_count":  1,
+  "disk":  {
+    "/":  {
+      "total":  "2930253778944",
+      "used":  "59240505344"
+    }
+  },
+  "memory":  {
+    "total":  "237490970624"
+  },
+  "gpu_nvidia":  [
+    {
+      "name":  "NVIDIA H100 80GB HBM3",
+      "memoryTotal":  "85520809984",
+      "cudaCores":  16896,
+      "architecture":  "Hopper",
+      "uuid":  "GPU-993dd5d1-740e-ce8f-7c5e-404188d4b950"
+    }
+  ],
+  "cudaVersion":  "12.8",
+  "writerId":  "hxe2gmm7pjfkhzpqw138lp72ba37sy99"
+}
