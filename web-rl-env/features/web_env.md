@@ -44,7 +44,7 @@ async def fetch_top_k_links(query, k):
         return links
 
 # 2. Async fetch page content using aiohttp
-async def fetch_content(session, url, max_chars=3000):
+async def fetch_content(session, url, max_chars=1500):
     try:
         async with session.get(url, timeout=8) as resp:
             if resp.status == 200:

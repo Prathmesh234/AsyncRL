@@ -130,12 +130,12 @@ training_args = GRPOConfig(
     output_dir="./grpo-streamed",
     max_steps=10,  # Increased from 3 to 10 for more training steps
     num_generations=4,  # Increased from 2 to 4 generations per prompt
-    per_device_train_batch_size=4,  # Changed from 2 to 4 to be divisible by num_generations
+    per_device_train_batch_size=2,  # Changed from 2 to 4 to be divisible by num_generations
     logging_steps=1,
     learning_rate=5e-6,
     gradient_checkpointing=True,
     bf16=True,
-    max_completion_length=10000,
+    max_completion_length=20000,
     report_to=report_to,
     log_completions=wandb_enabled,
     wandb_log_unique_prompts=wandb_enabled,
@@ -211,11 +211,3 @@ print("[PRINT] Starting GRPO training (SIMPLE PRINT DEBUG RUN)...")
 trainer.train()
 
 print("[PRINT] GRPO Training complete - Deleting YOLO Model run")
-# Clean up the output directory
-if os.path.exists(training_args.output_dir):
-    shutil.rmtree(training_args.output_dir)
-    print(f"[PRINT] Deleted training output directory: {training_args.output_dir}")
-else:
-    print(f"[PRINT] Output directory not found: {training_args.output_dir}")
-
-print("[PRINT] Cleanup complete!")
