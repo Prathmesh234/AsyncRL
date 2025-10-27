@@ -16,6 +16,7 @@ By default, GRPOTrainer from huggingface does not enable multi turn tool calling
    3. [Grading Infrastructure](#grading-infrastructure)
 4. [Running the Containers Locally](#running-the-containers-locally)
 5. [Training with GRPO](#training-with-grpo)
+   1. [ToolGRPOTrainer Run Summary](#toolgrpotrainer-run-summary)
 6. [Dataset Generation and Imitation Learning](#dataset-generation-and-imitation-learning)
 7. [Web RL Environment](#web-rl-environment)
 8. [Deployment Notes](#deployment-notes)
@@ -143,6 +144,42 @@ We use Hugging Face TRL's `GRPOTrainer` with the following workflow:
 3. `<azure>` → run `az account show --query name`.
 4. Return `<solution>`.
 5. Reward = structural + outcome + trajectory components.
+
+### ToolGRPOTrainer Run Summary
+
+The latest multi-turn GRPO run used `serving/ToolGRPOTrainer/run_custom_grpo.py` to fine-tune the Qwen-3B policy with live tool
+interactions enabled by the custom trainer overrides. The experiment bootstrapped the policy from the GRPO-pretrained checkpoint
+in `grpo-qwen-training/checkpoint-100` while reusing the production LoRA adapter from `GeneratorFS/qwen3-4b-thinking-openthoughts-lora/checkpoint-2280`.
+
+**Prompt curriculum.** Eighteen prompts were grouped into three difficulty bands covering single-tool warmups, two-tool workflo
+ws, and end-to-end production scenarios. The curriculum reuses the same structured prompt wrapper employed by the standard GRPO
+scripts so that completions remain compatible with the reward functions in `serving/ToolGRPOTrainer`.
+
+**Reward shaping.** Training combined four reward sources:
+
+- `tool_reward_fn`: encourages successful `<web>`, `<code>`, and `<azure>` calls.
+- `char_reward_fn`: stabilizes completion length and discourages runaway tool loops.
+- `format_reward_fn`: verifies the structural tags required by the graders.
+- `grader_reward_fn`: streams numeric scores from the external grader container via Azure Service Bus.
+
+**Trainer configuration.** The key hyperparameters for the run are listed below; the values align with the overrides in
+`run_custom_grpo.py` and the recorded state in `serving/ToolGRPOTrainer/grpo-streamed/checkpoint-10/trainer_state.json`.
+
+| Setting | Value |
+| --- | --- |
+| Output directory | `serving/ToolGRPOTrainer/grpo-streamed` |
+| Max steps | 10 |
+| Generations per prompt | 4 |
+| Per-device train batch size | 4 |
+| Learning rate | 5e-6 with linear decay |
+| Max completion length | 20,000 tokens |
+| Precision | bfloat16 with gradient checkpointing |
+| Logging interval | Every step (1) |
+| LoRA config | `r=8`, `alpha=16`, `dropout=0.1`, targets `q_proj`, `k_proj`, `v_proj`, `o_proj` |
+
+**Checkpoint and telemetry.** The streamed outputs and model weights are saved under `serving/ToolGRPOTrainer/grpo-streamed`.
+The latest adapter lives in `checkpoint-10/`, which also contains `trainer_state.json` with step-by-step reward traces. W&B
+telemetry for the same run is available under the project `AsyncRL Trainer` with the run name `latest3:tool-use-grpo-trainer-run`.
 
 ## Dataset Generation and Imitation Learning
 
