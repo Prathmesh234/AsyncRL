@@ -1,0 +1,39 @@
+# DisTrainer Configuration
+# Based on TorchTitan architecture patterns
+
+# Model Configuration
+# TODO: Update the path below to your local model directory
+# Example: "/path/to/your/models/Qwen3-4B-Thinking-2507"
+[model]
+name = "./models/Qwen3-4B-Thinking-2507"  # <-- FILL THIS: Path to local model folder
+use_lora = true
+lora_r = 8
+lora_alpha = 16
+target_modules = ["q_proj", "v_proj", "k_proj", "o_proj"]
+
+# Training Hyperparameters
+[training]
+learning_rate = 5e-6
+beta = 0.01  # KL penalty coefficient
+max_grad_norm = 1.0
+num_generations_per_prompt = 4
+
+# Distributed Configuration
+[parallel_dims]
+dp = 2   # Data parallel across 2 GPUs
+tp = 1   # No tensor parallelism
+pp = 1   # No pipeline parallelism
+
+[distributed]
+backend = "nccl"
+
+# Data Configuration
+[data]
+generations_dir = "./data/generations"
+max_sequence_length = 8192
+
+# Checkpoint Configuration
+[checkpoint]
+save_dir = "./checkpoints/Qwen3-4B-Thinking-Policy-v1"  # Descriptive name for trained weights
+save_interval = 10
+keep_latest_k = 3
