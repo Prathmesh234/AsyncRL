@@ -5,7 +5,8 @@
 # TODO: Update the path below to your local model directory
 # Example: "/path/to/your/models/Qwen3-4B-Thinking-2507"
 [model]
-name = "./models/Qwen3-4B-Thinking-2507"  # <-- FILL THIS: Path to local model folder
+name = "Qwen/Qwen3-4B-Thinking-2507"
+adapter_path = "/home/ubuntu/rl-storage/AsyncRL/serving/ToolGRPOTrainer/grpo-streamed/checkpoint-10"
 use_lora = true
 lora_r = 8
 lora_alpha = 16
@@ -29,7 +30,7 @@ backend = "nccl"
 
 # Data Configuration
 [data]
-generations_dir = "./data/generations_ckpt1000"
+generations_dir = "/home/ubuntu/rl-storage/AsyncRL/serving/DisTrainer/data/generations_ckpt1000"
 max_sequence_length = 8192
 
 # Checkpoint Configuration

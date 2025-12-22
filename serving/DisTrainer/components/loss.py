@@ -69,7 +69,9 @@ def compute_grpo_loss(
             ).unsqueeze(0)  # Add batch dimension
             
             # Get new logprobs from current policy
-            with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+            # Get new logprobs from current policy
+            # Note: mixed precision context handled by FSDP, but explicit cast ensures safety
+            with torch.amp.autocast('cuda', dtype=torch.bfloat16):
                 outputs = model(input_ids)
                 logits = outputs.logits if hasattr(outputs, 'logits') else outputs
             

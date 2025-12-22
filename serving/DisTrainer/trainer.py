@@ -23,6 +23,7 @@ class ModelConfig:
     lora_r: int = 8
     lora_alpha: int = 16
     target_modules: list = None
+    adapter_path: Optional[str] = None
     
     def __post_init__(self):
         if self.target_modules is None:
@@ -148,22 +149,36 @@ class Trainer:
         )
         
         # Apply LoRA if configured
+        # Apply LoRA if configured
         if self.config.model.use_lora:
-            from peft import get_peft_model, LoraConfig
+            from peft import get_peft_model, LoraConfig, PeftModel
             
-            lora_config = LoraConfig(
-                r=self.config.model.lora_r,
-                lora_alpha=self.config.model.lora_alpha,
-                target_modules=self.config.model.target_modules,
-                lora_dropout=0.05,
-                bias="none",
-                task_type="CAUSAL_LM"
-            )
-            model = get_peft_model(model, lora_config)
+            if self.config.model.adapter_path:
+                if is_main_rank():
+                    print(f"Loading LoRA adapter from: {self.config.model.adapter_path}")
+                # Load existing adapter and ensure it's trainable
+                model = PeftModel.from_pretrained(
+                    model, 
+                    self.config.model.adapter_path,
+                    is_trainable=True
+                )
+            else:
+                lora_config = LoraConfig(
+                    r=self.config.model.lora_r,
+                    lora_alpha=self.config.model.lora_alpha,
+                    target_modules=self.config.model.target_modules,
+                    lora_dropout=0.05,
+                    bias="none",
+                    task_type="CAUSAL_LM"
+                )
+                model = get_peft_model(model, lora_config)
             
             if is_main_rank():
                 print("LoRA applied to model")
                 model.print_trainable_parameters()
+        
+        # Ensure entire model is in bfloat16 to match FSDP expectation
+        model = model.to(torch.bfloat16)
         
         return model, tokenizer
     
