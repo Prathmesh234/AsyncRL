@@ -20,7 +20,7 @@ num_generations_per_prompt = 4
 
 # Distributed Configuration
 [parallel_dims]
-dp = 2   # Data parallel across 2 GPUs
+dp = 4   # Data parallel across 4 GPUs
 tp = 1   # No tensor parallelism
 pp = 1   # No pipeline parallelism
 
@@ -29,7 +29,7 @@ backend = "nccl"
 
 # Data Configuration
 [data]
-generations_dir = "./data/generations"
+generations_dir = "./data/generations_ckpt1000"
 max_sequence_length = 8192
 
 # Checkpoint Configuration
