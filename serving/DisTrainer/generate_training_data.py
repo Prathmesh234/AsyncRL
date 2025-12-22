@@ -31,7 +31,9 @@ def generate_offline(
     prompts: List[str],
     num_completions: int = 4,
     max_tokens: int = 256,
-    tensor_parallel_size: int = 1
+    tensor_parallel_size: int = 1,
+    tokenizer_path: Optional[str] = None,
+    adapter_path: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
     Generate completions using vLLM offline engine.
@@ -39,14 +41,20 @@ def generate_offline(
     """
     try:
         from vllm import LLM, SamplingParams
+        from vllm.lora.request import LoRARequest
     except ImportError:
         raise ImportError("vLLM is required for offline generation. Please install it: pip install vllm")
     
     print(f"Loading model from: {model_path}")
+    if adapter_path:
+        print(f"Enabling LoRA with adapter: {adapter_path}")
+
     llm = LLM(
         model=model_path,
+        tokenizer=tokenizer_path if tokenizer_path else model_path,
         tensor_parallel_size=tensor_parallel_size,
-        trust_remote_code=True
+        trust_remote_code=True,
+        enable_lora=True if adapter_path else False
     )
     
     sampling_params = SamplingParams(
@@ -57,7 +65,12 @@ def generate_offline(
     )
     
     print(f"Generating completions for {len(prompts)} prompts...")
-    outputs = llm.generate(prompts, sampling_params)
+    
+    lora_req = None
+    if adapter_path:
+        lora_req = LoRARequest("adapter", 1, adapter_path)
+        
+    outputs = llm.generate(prompts, sampling_params, lora_request=lora_req)
     
     results = []
     
@@ -152,6 +165,10 @@ def main():
                         help="Tensor parallel size (number of GPUs)")
     parser.add_argument("--prompts_file", type=str, default=None,
                         help="Optional file with custom prompts (one per line)")
+    parser.add_argument("--tokenizer", type=str, default=None,
+                        help="Optional tokenizer path if different from model")
+    parser.add_argument("--adapter_path", type=str, default=None,
+                        help="Optional path to LoRA adapter")
     
     args = parser.parse_args()
     
@@ -170,7 +187,9 @@ def main():
         prompts=prompts,
         num_completions=args.num_completions,
         max_tokens=args.max_tokens,
-        tensor_parallel_size=args.tensor_parallel_size
+        tensor_parallel_size=args.tensor_parallel_size,
+        tokenizer_path=args.tokenizer,
+        adapter_path=args.adapter_path
     )
     
     # Save to batch files
