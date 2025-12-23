@@ -1,0 +1,19 @@
+[project]
+name = "disgenerator"
+version = "0.1.0"
+description = "Distributed Trajectory Generator for RL Training"
+dependencies = [
+    "aiohttp",
+    "azure-servicebus",
+    "python-dotenv",
+    "transformers",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+server = [
+    "vllm",
+]
+
+[tool.uv]
+package = false

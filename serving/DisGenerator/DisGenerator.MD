@@ -27,12 +27,44 @@ The key to making this architecture efficient is **high concurrency**:
 
 **Our Strategy**: Process 10+ prompts simultaneously (80+ trajectories = 10 prompts × 8 completions).
 
-**The Pipeline**:
+**The Pipeline Visualized**:
+
+```mermaid
+graph TD
+    subgraph "Orchestrator (CPU/Python)"
+        A[Prompt Pool] --> B{Async Juggler}
+        B -->|Async Task 1| C[Trajectory 1]
+        B -->|Async Task N| D[Trajectory N]
+    end
+
+    subgraph "Prefill Cluster (GPUs 0,1)"
+        C -->|1. Warm KV| P1[Prefill Engine]
+        D -->|1. Warm KV| P1
+        P1 -->|KV Cache| KV[(Shared KV Cache)]
+    end
+
+    subgraph "Decode Cluster (GPUs 2,3)"
+        C -->|2. Stream Tokens| D1[Decode Engine]
+        D -->|2. Stream Tokens| D1
+        KV -.->|NCCL Transfer| D1
+    end
+
+    subgraph "Communication Fabric (Azure)"
+        D1 -->|3. Hit Intercept Tag| TB[Tool Bridge]
+        TB -->|4. Execute Tool| SB[Service Bus]
+        SB -->|5. Tool Result| TB
+        TB -->|6. Resume Turn| C
+    end
 ```
-While Decode GPUs generate tokens for Prompts 1-5...
-Prefill GPUs are processing Prompts 6-10.
-→ No GPU sits idle.
-```
+
+### The "Juggler" Analogy
+The `DisGenerator` acts as a high-speed **Juggler**. Each completion is a ball:
+1.  **Throw (Prefill)**: The juggler tosses a prompt into the prefill hand.
+2.  **Catch & Spin (Decode)**: The decode hand generates tokens as long as the ball is in flight.
+3.  **Bounce (Tool Call)**: If a tool tag is hit, the ball "bounces" off the table (Azure Service Bus).
+4.  **No Stalling**: While waiting for a ball to bounce back from the table, the juggler doesn't stop; they continue throwing and catching the other 79 balls.
+
+---
 
 ---
 
@@ -190,40 +222,130 @@ Each line in the output file:
 
 ## Implementation Plan
 
-### Phase 1: Infrastructure
-- [ ] Create `serving/DisGenerator/` folder structure
-- [ ] Create launch scripts for Prefill and Decode servers
-- [ ] Create proxy script (optional, if using disagg_proxy pattern)
+### Phase 1: Infrastructure ✅ COMPLETE
+- [x] Create `serving/DisGenerator/` folder structure
+- [x] Create launch scripts for Prefill and Decode servers (`scripts/`)
+- [x] Create `config.py` with all configuration options
+- [x] Create `.env.template` for environment setup
 
-### Phase 2: Orchestrator
-- [ ] Implement async orchestrator (`generator.py`)
-- [ ] Implement tool interception logic
-- [ ] Integrate with existing `communication/` modules
+### Phase 2: Orchestrator ✅ COMPLETE
+- [x] Implement async orchestrator (`generator.py`)
+- [x] Implement tool interception logic (SSEParser, ToolParser)
+- [x] Integrate with existing `communication/` modules (`tool_executor.py`)
 
-### Phase 3: Reward & Output
-- [ ] Integrate grader (reward model) calls
-- [ ] Implement JSONL writer matching DisTrainer format
-- [ ] Add logprob extraction
+### Phase 3: Reward & Output ✅ COMPLETE
+- [x] Integrate grader (reward model) calls via `AsyncToolExecutor.grade_completion()`
+- [x] Implement JSONL writer matching DisTrainer format
+- [x] Add logprob extraction from streaming responses
 
-### Phase 4: Testing
+### Phase 4: Testing 🔄 IN PROGRESS
 - [ ] Test with mock tools (fast iteration)
 - [ ] Test with real Service Bus connection
 - [ ] Validate output format against DisTrainer expectations
 
 ---
 
-## File Structure (Planned)
+## Running the Servers
+
+### Quick Start (All Servers)
+
+```bash
+cd serving/DisGenerator
+
+# Start both Prefill and Decode servers
+bash scripts/start_all.sh
+
+# Monitor logs
+tail -f logs/prefill.log logs/decode.log
+
+# Stop all servers when done
+bash scripts/stop_all.sh
+```
+
+### Manual Server Start
+
+If you prefer to start servers individually (useful for debugging):
+
+**Terminal 1 - Prefill Server (GPUs 0,1):**
+```bash
+cd serving/DisGenerator
+bash scripts/start_prefill.sh
+```
+
+**Terminal 2 - Decode Server (GPUs 2,3):**
+```bash
+cd serving/DisGenerator
+bash scripts/start_decode.sh
+```
+
+### Health Check
+
+```bash
+# Check if servers are running
+curl http://localhost:8100/health  # Prefill
+curl http://localhost:8200/health  # Decode
+
+# List available models
+curl http://localhost:8100/v1/models
+curl http://localhost:8200/v1/models
+```
+
+---
+
+## Testing the Generator
+
+### Using the Test Prompts File
+
+A sample `prompts.jsonl` file is included for testing. Use `uv run` to execute:
+
+```bash
+cd serving/DisGenerator
+
+# Run with test prompts
+uv run python run.py --prompts-file prompts.jsonl --output-dir ./data/test_output
+
+# Run with debug logging
+uv run python run.py --prompts-file prompts.jsonl --debug
+```
+
+### Interactive Mode
+
+```bash
+uv run python run.py --interactive
+```
+
+Then enter prompts one per line and type `generate` to process them.
+
+### Custom Batch Size
+
+```bash
+# Process 5 prompts at a time
+uv run python run.py --prompts-file prompts.jsonl --batch-size 5
+```
+
+---
+
+## File Structure (Implemented)
 
 ```
 serving/DisGenerator/
 ├── DisGenerator.MD          # This document
+├── __init__.py              # Package exports
+├── config.py                # Configuration (ports, model, timeouts, etc.)
+├── generator.py             # Main async orchestrator with SSE/tool parsing
+├── tool_executor.py         # Async tool execution via Service Bus
+├── run.py                   # CLI runner (batch & interactive modes)
+├── prompts.jsonl            # Sample test prompts for testing
+├── requirements.txt         # Python dependencies
+├── .env.template            # Environment variable template
 ├── scripts/
-│   ├── start_prefill.sh     # Launch prefill server
-│   ├── start_decode.sh      # Launch decode server
-│   └── start_all.sh         # Launch everything
-├── generator.py             # Main async orchestrator
-├── config.py                # Configuration (ports, model, etc.)
-└── requirements.txt         # vllm, aiohttp, etc.
+│   ├── start_prefill.sh     # Launch prefill server (GPUs 0,1)
+│   ├── start_decode.sh      # Launch decode server (GPUs 2,3)
+│   ├── start_all.sh         # Launch everything with health checks
+│   └── stop_all.sh          # Graceful shutdown
+├── logs/                    # Server logs (created at runtime)
+└── data/                    # Generated output (created at runtime)
+    └── generations/         # JSONL output files
 ```
 
 ---
