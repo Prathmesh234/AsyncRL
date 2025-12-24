@@ -19,3 +19,21 @@ training/.env
 
 # Notebook artifacts
 .ipynb_checkpoints/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+ENV/
+.pytest_cache/
+*.log
+
+# DisGenerator specific
+serving/DisGenerator/logs/
+serving/DisGenerator/data/
+serving/DisGenerator/*.pid
+serving/DisGenerator/uv.lock
+

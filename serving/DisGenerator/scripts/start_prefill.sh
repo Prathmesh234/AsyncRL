@@ -1,64 +1,97 @@
 #!/bin/bash
-# DisGenerator Prefill Server (with KV Transfer)
-# Runs on GPUs 0, 1 with TP=2
-# Transfers KV cache to Decode server via PyNccl connector
+# =============================================================================
+# DisGenerator - Start Prefill Server(s)
+# =============================================================================
+# This script starts vLLM prefill server(s) configured as KV producers.
+# Prefill servers process prompts and send KV cache to decode servers via NCCL.
+#
+# Usage:
+#   ./start_prefill.sh [GPU_ID] [HTTP_PORT] [KV_PORT]
+#
+# Examples:
+#   ./start_prefill.sh              # Use defaults: GPU 0, port 20001, kv 21001
+#   ./start_prefill.sh 0 20001 21001
+#   ./start_prefill.sh 1 20003 21002
+#
+# Environment Variables:
+#   MODEL             - Model to serve (default: Qwen/Qwen3-4B-Thinking-2507)
+#   PROXY_PORT        - Proxy ZMQ port (default: 30001)
+#   MAX_MODEL_LEN     - Max sequence length (default: 8192)
+#   DTYPE             - Data type (default: float16)
+# =============================================================================
 
 set -e
 
-# Configuration
-# Base model (from DisTrainer train_config.toml)
-MODEL=${MODEL:-"Qwen/Qwen3-4B-Thinking-2507"}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-# LoRA adapter from DisTrainer
-LORA_ADAPTER_PATH=${LORA_ADAPTER_PATH:-"../../DisTrainer/checkpoints/Qwen3-4B-Thinking-Policy-v1/latest_adapter"}
-LORA_ADAPTER_NAME=${LORA_ADAPTER_NAME:-"grpo-adapter"}
+# Change to project directory
+cd "$PROJECT_DIR"
 
-# Server settings
-PORT=${PREFILL_PORT:-8100}
-MAX_MODEL_LEN=${MAX_MODEL_LEN:-32768}
-GPU_MEMORY_UTIL=${GPU_MEMORY_UTIL:-0.85}
-MAX_NUM_SEQS=${MAX_NUM_SEQS:-128}
-MAX_LORAS=${MAX_LORAS:-4}
+# Ensure logs directory exists
+mkdir -p logs
 
-# KV Transfer settings (for disaggregated prefill)
-# Using PyNccl for fast GPU-to-GPU transfer on same machine
-KV_CONNECTOR=${KV_CONNECTOR:-"PyNcclConnector"}
-KV_ROLE=${KV_ROLE:-"kv_producer"}  # Prefill = producer
-KV_RANK=${KV_RANK:-0}
-KV_PARALLEL_SIZE=${KV_PARALLEL_SIZE:-2}  # 2 instances: prefill + decode
+# Parse arguments with defaults
+GPU_ID="${1:-0}"
+HTTP_PORT="${2:-20001}"
+KV_PORT="${3:-21001}"
 
-# Set GPU visibility
-export CUDA_VISIBLE_DEVICES=0,1
+# Configuration from environment with defaults (matches DisTrainer)
+MODEL="${MODEL:-Qwen/Qwen3-4B-Thinking-2507}"
+PROXY_PORT="${PROXY_PORT:-30001}"
+MAX_MODEL_LEN="${MAX_MODEL_LEN:-8192}"
+DTYPE="${DTYPE:-float16}"
+GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.9}"
 
-echo "============================================"
-echo "  DisGenerator Prefill Server (KV Producer)"
-echo "============================================"
-echo "Base Model: $MODEL"
-echo "LoRA Adapter: $LORA_ADAPTER_NAME ($LORA_ADAPTER_PATH)"
-echo "Port: $PORT"
-echo "GPUs: $CUDA_VISIBLE_DEVICES (TP=2)"
-echo "Max Model Length: $MAX_MODEL_LEN"
-echo "KV Connector: $KV_CONNECTOR"
-echo "KV Role: $KV_ROLE (rank $KV_RANK)"
-echo "KV Handshake: $VLLM_KV_IP:$VLLM_KV_PORT"
-echo "============================================"
+# Server identification
+SERVER_ID="prefill_gpu${GPU_ID}_port${HTTP_PORT}"
+LOG_FILE="logs/${SERVER_ID}.log"
 
-# Build LoRA modules argument
-LORA_MODULES="${LORA_ADAPTER_NAME}=${LORA_ADAPTER_PATH}"
+echo "=============================================="
+echo "Starting Prefill Server (KV Producer)"
+echo "=============================================="
+echo "  GPU:        $GPU_ID"
+echo "  HTTP Port:  $HTTP_PORT"
+echo "  KV Port:    $KV_PORT"
+echo "  Model:      $MODEL"
+echo "  Proxy:      0.0.0.0:$PROXY_PORT"
+echo "  Log file:   $LOG_FILE"
+echo "=============================================="
 
-uv run python -m vllm.entrypoints.openai.api_server \
-    --model "$MODEL" \
-    --tensor-parallel-size 2 \
-    --port "$PORT" \
-    --max-model-len "$MAX_MODEL_LEN" \
-    --gpu-memory-utilization "$GPU_MEMORY_UTIL" \
-    --enable-prefix-caching \
-    --max-num-seqs "$MAX_NUM_SEQS" \
-    --enable-lora \
-    --lora-modules "$LORA_MODULES" \
-    --max-loras "$MAX_LORAS" \
+# Build KV transfer config JSON
+KV_CONFIG=$(cat <<EOF
+{
+  "kv_connector": "P2pNcclConnector",
+  "kv_role": "kv_producer",
+  "kv_buffer_size": "1e9",
+  "kv_port": "$KV_PORT",
+  "kv_connector_extra_config": {
+    "proxy_ip": "0.0.0.0",
+    "proxy_port": "$PROXY_PORT",
+    "http_port": "$HTTP_PORT",
+    "send_type": "PUT_ASYNC",
+    "nccl_num_channels": "16"
+  }
+}
+EOF
+)
+
+# Convert to single line for command
+KV_CONFIG_INLINE=$(echo "$KV_CONFIG" | tr -d '\n' | tr -s ' ')
+
+# Start the server
+echo "Launching vLLM server..."
+CUDA_VISIBLE_DEVICES=$GPU_ID vllm serve $MODEL \
+    --enforce-eager \
+    --host 0.0.0.0 \
+    --port $HTTP_PORT \
+    --tensor-parallel-size 1 \
+    --seed 1024 \
+    --dtype $DTYPE \
+    --max-model-len $MAX_MODEL_LEN \
+    --max-num-batched-tokens $MAX_MODEL_LEN \
+    --max-num-seqs 128 \
     --trust-remote-code \
-    --kv-connector "$KV_CONNECTOR" \
-    --kv-role "$KV_ROLE" \
-    --kv-rank "$KV_RANK" \
-    --kv-parallel-size "$KV_PARALLEL_SIZE"
+    --gpu-memory-utilization $GPU_MEMORY_UTILIZATION \
+    --kv-transfer-config "$KV_CONFIG_INLINE" \
+    2>&1 | tee "$LOG_FILE"

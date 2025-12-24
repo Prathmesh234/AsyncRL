@@ -1,144 +1,153 @@
 """
-DisGenerator Configuration
+Configuration for DisGenerator disaggregated serving.
 
-Central configuration for the Disaggregated Prefill-Decode Trajectory Generator.
-Uses 2P/2D architecture:
-- 2 Prefill GPUs (0, 1) for processing prompts/history
-- 2 Decode GPUs (2, 3) for token generation
+This module provides configuration for the P2P NCCL disaggregated
+prefill-decode architecture.
 """
 
 import os
 from dataclasses import dataclass, field
-from typing import List, Optional
-from dotenv import load_dotenv
-
-load_dotenv()
+from typing import Literal
 
 
 @dataclass
 class ServerConfig:
-    """vLLM server configuration."""
-    host: str = "localhost"
-    port: int = 8100
+    """Configuration for a single vLLM server instance."""
+    
+    gpu_id: int
+    http_port: int
+    kv_port: int
+    role: Literal["prefill", "decode"]
     
     @property
-    def base_url(self) -> str:
-        return f"http://{self.host}:{self.port}"
+    def kv_role(self) -> str:
+        return "kv_producer" if self.role == "prefill" else "kv_consumer"
     
     @property
-    def completions_url(self) -> str:
-        return f"{self.base_url}/v1/chat/completions"
+    def kv_buffer_size(self) -> str:
+        # Prefill needs less buffer (produces), decode needs more (consumes)
+        return "1e9" if self.role == "prefill" else "8e9"
+    
+    @property
+    def gpu_memory_utilization(self) -> float:
+        # Decode needs headroom for incoming KV cache
+        return 0.9 if self.role == "prefill" else 0.7
 
 
 @dataclass
 class DisGeneratorConfig:
     """Main configuration for DisGenerator."""
     
-    # Model Configuration
-    # Base model for vLLM engine (from DisTrainer train_config.toml)
-    model_name: str = os.getenv("MODEL_NAME", "Qwen/Qwen3-4B-Thinking-2507")
+    # Model configuration (matches DisTrainer)
+    model: str = os.getenv("MODEL", "Qwen/Qwen3-4B-Thinking-2507")
+    dtype: str = "float16"
+    max_model_len: int = 8192
+    max_num_batched_tokens: int = 8192
+    max_num_seqs: int = 128
+    tensor_parallel_size: int = 1
+    seed: int = 1024
+    trust_remote_code: bool = True
+    enforce_eager: bool = True
     
-    # LoRA adapter from DisTrainer (set to empty string to disable)
-    lora_adapter_path: str = os.getenv("LORA_ADAPTER_PATH", "serving/DisTrainer/checkpoints/Qwen3-4B-Thinking-Policy-v1/latest_adapter")
-    lora_adapter_name: str = os.getenv("LORA_ADAPTER_NAME", "grpo-adapter")
+    # GPU allocation (2P2D by default: 2 Prefill + 2 Decode for 4 GPUs)
+    # For 2 GPUs, use 1P1D
+    prefill_gpus: list[int] = field(default_factory=lambda: [0])
+    decode_gpus: list[int] = field(default_factory=lambda: [1])
     
-    # Server Configuration (Disaggregated)
-    prefill_server: ServerConfig = field(default_factory=lambda: ServerConfig(
-        host=os.getenv("PREFILL_HOST", "localhost"),
-        port=int(os.getenv("PREFILL_PORT", "8100"))
-    ))
-    decode_server: ServerConfig = field(default_factory=lambda: ServerConfig(
-        host=os.getenv("DECODE_HOST", "localhost"),
-        port=int(os.getenv("DECODE_PORT", "8200"))
-    ))
+    # Port configuration
+    prefill_base_http_port: int = 20001
+    decode_base_http_port: int = 20002
+    prefill_base_kv_port: int = 21001
+    decode_base_kv_port: int = 22001
     
-    # Generation Parameters
-    prompts_per_batch: int = int(os.getenv("PROMPTS_PER_BATCH", "10"))
-    completions_per_prompt: int = int(os.getenv("COMPLETIONS_PER_PROMPT", "8"))
-    max_tokens_per_completion: int = int(os.getenv("MAX_TOKENS_PER_COMPLETION", "4096"))
-    max_turns: int = int(os.getenv("MAX_TURNS", "8"))  # Max tool call turns
-    
-    # Sampling Parameters
-    temperature: float = float(os.getenv("TEMPERATURE", "0.7"))
-    top_p: float = float(os.getenv("TOP_P", "0.9"))
-    
-    # Tool Calling Configuration
-    # Note: We intercept tool tags in the streaming loop manually to ensure
-    # we capture the full closing tag. We only stop the server on </solution>.
-    stop_tokens: List[str] = field(default_factory=lambda: [
-        "</solution>"
-    ])
-    
-    intercept_tags: List[str] = field(default_factory=lambda: [
-        "</web>", "</code>", "</azure>"
-    ])
+    # Proxy configuration
+    proxy_ip: str = "0.0.0.0"
+    proxy_port: int = 30001
+    proxy_http_port: int = 10001
     
     # Timeouts
-    tool_timeout_s: int = int(os.getenv("TOOL_TIMEOUT_S", "30"))
-    grader_timeout_s: int = int(os.getenv("GRADER_TIMEOUT_S", "60"))
-    request_timeout_s: int = int(os.getenv("REQUEST_TIMEOUT_S", "120"))
+    server_timeout_seconds: int = 600
+    request_timeout_hours: int = 6
     
-    # Output Configuration
-    output_dir: str = os.getenv("OUTPUT_DIR", "./data/generations")
-    batches_per_file: int = int(os.getenv("BATCHES_PER_FILE", "1"))
-    
-    # Service Bus Configuration
-    service_bus_connection_string: Optional[str] = os.getenv("SERVICE_BUS_CONNECTION_STRING")
-    command_topic_name: str = os.getenv("COMMAND_TOPIC_NAME", "commandtopic")
-    reward_topic_name: str = os.getenv("REWARD_TOPIC_NAME", "rewardtopic")
-    web_subscription_name: str = os.getenv("WEB_SUBSCRIPTION_NAME", "websubscription")
-    code_subscription_name: str = os.getenv("CODE_SUBSCRIPTION_NAME", "codesubscription")
-    grader_subscription_name: str = os.getenv("GRADER_SUBSCRIPTION_NAME", "gradersubscription")
-    grader_reward_subscription_name: str = os.getenv("GRADER_REWARD_SUBSCRIPTION_NAME", "webrewardsubscription")
-    
-    # System Prompt
-    system_prompt: str = os.getenv("SYSTEM_PROMPT", """You are an orchestrator agent. Decide when to use tools and when to answer directly.
-Use private reasoning between <think> and </think>; never reveal it.
-You may call only these tools (schemas are provided separately):
-• web.search(q, k) – retrieve docs/snippets. Use <web>{"type": "web", "q": "search terms", "k": INTEGER}</web>. 
-• code.exec(cmd, cwd, timeout_s) – run commands in /workspace. <code>{"type": "code", "code_command": "shell command"}</code>
-• azure.run(args[]) – whitelisted az subcommands; prefer idempotent flags. <azure>{"type": "azure", "azure_command": "az subcommand"}</azure>
-
-When you have the final answer, wrap it in <solution>your answer</solution> tags.""")
-    
-    # Logging
-    log_level: str = os.getenv("LOG_LEVEL", "INFO")
-    debug: bool = os.getenv("DEBUG", "0") == "1"
-    
-    def validate(self) -> bool:
-        """Validate configuration."""
-        if not self.service_bus_connection_string:
-            print("[WARNING] SERVICE_BUS_CONNECTION_STRING not set. Tool calls will fail.")
-        return True
+    # NCCL configuration
+    nccl_num_channels: int = 16
+    send_type: str = "PUT_ASYNC"
     
     @property
-    def total_trajectories_per_batch(self) -> int:
-        """Total number of trajectories generated per batch."""
-        return self.prompts_per_batch * self.completions_per_prompt
+    def prefill_servers(self) -> list[ServerConfig]:
+        """Generate prefill server configurations."""
+        return [
+            ServerConfig(
+                gpu_id=gpu_id,
+                http_port=self.prefill_base_http_port + i * 2,
+                kv_port=self.prefill_base_kv_port + i,
+                role="prefill",
+            )
+            for i, gpu_id in enumerate(self.prefill_gpus)
+        ]
+    
+    @property
+    def decode_servers(self) -> list[ServerConfig]:
+        """Generate decode server configurations."""
+        return [
+            ServerConfig(
+                gpu_id=gpu_id,
+                http_port=self.decode_base_http_port + i * 2,
+                kv_port=self.decode_base_kv_port + i,
+                role="decode",
+            )
+            for i, gpu_id in enumerate(self.decode_gpus)
+        ]
+    
+    def get_kv_transfer_config(self, server: ServerConfig) -> dict:
+        """Generate KV transfer config JSON for a server."""
+        return {
+            "kv_connector": "P2pNcclConnector",
+            "kv_role": server.kv_role,
+            "kv_buffer_size": server.kv_buffer_size,
+            "kv_port": str(server.kv_port),
+            "kv_connector_extra_config": {
+                "proxy_ip": self.proxy_ip,
+                "proxy_port": str(self.proxy_port),
+                "http_port": str(server.http_port),
+                "send_type": self.send_type,
+                "nccl_num_channels": str(self.nccl_num_channels),
+            },
+        }
 
 
-# Singleton instance
-config = DisGeneratorConfig()
+# Default configuration
+default_config = DisGeneratorConfig()
 
 
-# GPU Configuration for vLLM servers
-VLLM_SERVER_CONFIG = {
-    "prefill": {
-        "cuda_visible_devices": "0,1",
-        "tensor_parallel_size": 2,
-        "port": 8100,
-        "max_model_len": 32768,
-        "gpu_memory_utilization": 0.85,
-        "enable_prefix_caching": True,
-        "max_num_seqs": 128,
-    },
-    "decode": {
-        "cuda_visible_devices": "2,3",
-        "tensor_parallel_size": 2,
-        "port": 8200,
-        "max_model_len": 32768,
-        "gpu_memory_utilization": 0.85,
-        "enable_prefix_caching": True,
-        "max_num_seqs": 128,
-    }
-}
+# Preset configurations for different GPU setups
+def get_config_1p1d() -> DisGeneratorConfig:
+    """1 Prefill + 1 Decode (2 GPUs)"""
+    return DisGeneratorConfig(
+        prefill_gpus=[0],
+        decode_gpus=[1],
+    )
+
+
+def get_config_2p2d() -> DisGeneratorConfig:
+    """2 Prefill + 2 Decode (4 GPUs) - balanced"""
+    return DisGeneratorConfig(
+        prefill_gpus=[0, 1],
+        decode_gpus=[2, 3],
+    )
+
+
+def get_config_1p3d() -> DisGeneratorConfig:
+    """1 Prefill + 3 Decode (4 GPUs) - decode heavy"""
+    return DisGeneratorConfig(
+        prefill_gpus=[0],
+        decode_gpus=[1, 2, 3],
+    )
+
+
+def get_config_3p1d() -> DisGeneratorConfig:
+    """3 Prefill + 1 Decode (4 GPUs) - prefill heavy"""
+    return DisGeneratorConfig(
+        prefill_gpus=[0, 1, 2],
+        decode_gpus=[3],
+    )

@@ -51,9 +51,10 @@ class CheckpointManager:
             checkpoint_id=str(checkpoint_path)
         )
         
-        # Cleanup old checkpoints (only on main rank)
+        # Cleanup and update symlink (only on main rank)
         if is_main_rank():
             self._cleanup_old_checkpoints()
+            self._update_latest_symlink(checkpoint_path)
         
         return str(checkpoint_path)
     
@@ -112,3 +113,18 @@ class CheckpointManager:
     def has_checkpoint(self) -> bool:
         """Check if any checkpoint exists."""
         return len(list(self.checkpoint_dir.glob("step_*"))) > 0
+
+    def _update_latest_symlink(self, latest_path: Path):
+        """Update a symlink named 'latest_adapter' to the latest checkpoint."""
+        symlink_path = self.checkpoint_dir / "latest_adapter"
+        try:
+            if symlink_path.is_symlink() or symlink_path.exists():
+                symlink_path.unlink()
+            
+            # Create symlink to the latest directory name
+            # Using relative path (target.name) makes the symlink portable
+            symlink_path.symlink_to(latest_path.name, target_is_directory=True)
+        except Exception as e:
+            # Don't fail training if symlink fails
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to update 'latest_adapter' symlink: {e}")
