@@ -39,9 +39,11 @@ KV_PORT="${3:-21001}"
 # Configuration from environment with defaults (matches DisTrainer)
 MODEL="${MODEL:-Qwen/Qwen3-4B-Thinking-2507}"
 PROXY_PORT="${PROXY_PORT:-30001}"
-MAX_MODEL_LEN="${MAX_MODEL_LEN:-8192}"
+MAX_MODEL_LEN="${MAX_MODEL_LEN:-32768}"
 DTYPE="${DTYPE:-float16}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.9}"
+LORA_MODULE_NAME="${LORA_MODULE_NAME:-grpo-adapter}"
+LORA_MODULE_PATH="${LORA_MODULE_PATH:-/home/ubuntu/rl-storage/AsyncRL/serving/ToolGRPOTrainer/grpo-streamed/checkpoint-10}"
 
 # Server identification
 SERVER_ID="prefill_gpu${GPU_ID}_port${HTTP_PORT}"
@@ -81,7 +83,7 @@ KV_CONFIG_INLINE=$(echo "$KV_CONFIG" | tr -d '\n' | tr -s ' ')
 
 # Start the server
 echo "Launching vLLM server..."
-CUDA_VISIBLE_DEVICES=$GPU_ID vllm serve $MODEL \
+CUDA_VISIBLE_DEVICES=$GPU_ID uv run vllm serve $MODEL \
     --enforce-eager \
     --host 0.0.0.0 \
     --port $HTTP_PORT \
@@ -94,4 +96,6 @@ CUDA_VISIBLE_DEVICES=$GPU_ID vllm serve $MODEL \
     --trust-remote-code \
     --gpu-memory-utilization $GPU_MEMORY_UTILIZATION \
     --kv-transfer-config "$KV_CONFIG_INLINE" \
+    --enable-lora \
+    --lora-modules "$LORA_MODULE_NAME=$LORA_MODULE_PATH" \
     2>&1 | tee "$LOG_FILE"

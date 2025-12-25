@@ -16,12 +16,16 @@ import os
 import sys
 
 import aiohttp
+from dotenv import load_dotenv
 
+# Load environment variables
+load_dotenv()
 
 # Configuration (matches DisTrainer)
 PROXY_URL = os.getenv("PROXY_URL", "http://localhost:10001")
 MODEL = os.getenv("MODEL", "Qwen/Qwen3-4B-Thinking-2507")
-MAX_TOKENS = int(os.getenv("MAX_TOKENS", "100"))
+MAX_TOKENS = int(os.getenv("MAX_TOKENS", "20000"))
+SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "")
 
 
 async def generate_simple(prompt: str, stream: bool = True) -> str:
@@ -35,11 +39,14 @@ async def generate_simple(prompt: str, stream: bool = True) -> str:
     Returns:
         The complete response text
     """
+    messages = []
+    if SYSTEM_PROMPT:
+        messages.append({"role": "system", "content": SYSTEM_PROMPT})
+    messages.append({"role": "user", "content": prompt})
+
     payload = {
         "model": MODEL,
-        "messages": [
-            {"role": "user", "content": prompt}
-        ],
+        "messages": messages,
         "max_tokens": MAX_TOKENS,
         "stream": stream,
         "temperature": 0.7,

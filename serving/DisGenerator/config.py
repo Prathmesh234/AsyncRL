@@ -41,8 +41,8 @@ class DisGeneratorConfig:
     # Model configuration (matches DisTrainer)
     model: str = os.getenv("MODEL", "Qwen/Qwen3-4B-Thinking-2507")
     dtype: str = "float16"
-    max_model_len: int = 8192
-    max_num_batched_tokens: int = 8192
+    max_model_len: int = 32768
+    max_num_batched_tokens: int = 32768
     max_num_seqs: int = 128
     tensor_parallel_size: int = 1
     seed: int = 1024
