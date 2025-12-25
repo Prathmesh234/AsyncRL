@@ -1,0 +1,10 @@
+{"prompt_id": "1", "messages": [{"role": "user", "content": "Search for the latest machine learning trends in 2024."}]}
+{"prompt_id": "2", "messages": [{"role": "user", "content": "Write a Python script to calculate the factorial of a number."}]}
+{"prompt_id": "3", "messages": [{"role": "user", "content": "What are the benefits of using Azure Service Bus?"}]}
+{"prompt_id": "4", "messages": [{"role": "user", "content": "Explain the concept of quantum entanglement."}]}
+{"prompt_id": "5", "messages": [{"role": "user", "content": "How do I deploy a docker container to Azure Container Apps?"}]}
+{"prompt_id": "6", "messages": [{"role": "user", "content": "Find the current stock price of NVIDIA."}]}
+{"prompt_id": "7", "messages": [{"role": "user", "content": "Write a sorting algorithm in C++."}]}
+{"prompt_id": "8", "messages": [{"role": "user", "content": "What is the capital of Australia?"}]}
+{"prompt_id": "9", "messages": [{"role": "user", "content": "Generate a random password with 12 characters."}]}
+{"prompt_id": "10", "messages": [{"role": "user", "content": "Summarize the history of the internet."}]}

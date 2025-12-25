@@ -8,113 +8,159 @@ To orchestrate large-scale, multi-turn generation tasks that involve:
 
 ## Architecture
 
-The Orchestrator acts as the "State Manager" while the GPU acts as a stateless "Token Generator".
+The system uses a **Dual-Queue Event Loop** to decouple expensive GPU inference from slow I/O tool execution.
 
 ```mermaid
 graph TD
-    Q[Task Queue] -->|Pop| W[Worker Thread]
-    W -->|HTTP Request| Proxy[DisAGG Proxy]
-    Proxy -->|Stream| W
-    W -->|Check| Check{Tool Tag?}
-    
-    Check -- Yes (<web>, <code>, <azure>) --> Parser[Extract JSON]
-    Parser --> Tool[Execute Tool (Async)]
-    Tool -->|Result| Update[Append <tool_result>]
-    Update -->|Re-Queue| Q
-    
-    Check -- No (EOS / <solution>) --> Save[Save JSONL]
+    subgraph "Queue System"
+        TQ[Task Queue\n(Ready for GPU)]
+        ToolQ[Tool Queue\n(Needs Execution)]
+    end
+
+    subgraph "Inference Loop (Fast)"
+        TQ -->|Pop| GW[GPU Worker]
+        GW -->|Generate| Proxy[vLLM Proxy]
+        Proxy -->|Stream Tokens| GW
+        GW -->|Detect Tool?| Decision{Tag Found?}
+        Decision -- Yes -->|Abort & Push| ToolQ
+        Decision -- No -->|Finish| Save[Save Result]
+    end
+
+    subgraph "Tool Loop (Slow/Async)"
+        ToolQ -->|Pop| TW[Tool Worker]
+        TW -->|Extract JSON| Parser
+        Parser -->|IO Wait| Ext[Execute Tool\n(Azure/Web/Code)]
+        Ext -->|Result| Appender[Append <tool_result>]
+        Appender -->|Push Back| TQ
+    end
 ```
 
 ## Core Components
 
-### 1. The Trajectory Object
-A simple data class that holds the state of a single conversation.
+### 1. The Queues
+*   **`TaskQueue`**: Holds `Trajectory` objects that need text generation. These are either new prompts or conversations waiting for the model to generate the next response after a tool result.
+*   **`ToolQueue`**: Holds `Trajectory` objects where the model has just emitted a tool call (e.g., `<web>`). These need to be parsed and executed.
 
-```python
-@dataclass
-class Trajectory:
-    id: str                  # Unique ID
-    messages: List[Dict]     # Full OpenAI-format history
-    completions: List[str]   # Saved completions for training data
-    status: str = "QUEUED"   # QUEUED, GENERATING, TOOL_WAITING, COMPLETED
-```
+### 2. The Workers
 
-### 2. The Worker Loop
-We spawn `N` concurrent workers (e.g., 50). Each worker runs an infinite loop processing tasks from the queue.
+#### A. GPU Workers (Inference)
+*   **Role**: Manage the connection to vLLM.
+*   **Concurrency**: High (e.g., 50+ workers) to keep the GPU batch full.
+*   **Logic**:
+    1.  Pop `Trajectory` from `TaskQueue`.
+    2.  Send prompt/history to Proxy.
+    3.  Stream tokens using `stream_parser`.
+    4.  **CRITICAL**: If a tool tag (e.g., `<web>`) is detected:
+        *   **Abort** the HTTP request immediately (frees the GPU slot).
+        *   Push the `Trajectory` (with the partial tool call) to `ToolQueue`.
+    5.  If `<solution>` or EOS is reached, save and finish.
 
-**The Algorithm:**
-1.  **Fetch**: Get a `Trajectory` from the Queue.
-2.  **Generate**: Send `trajectory.messages` to the Proxy.
-3.  **Stream & Detect**:
-    *   Stream response chunks.
-    *   Use `stream_parser` logic to detect complete tags: `<web>`, `<code>`, `<azure>`.
-    *   If tag detected: **ABORT STREAM**.
-4.  **Branch**:
-    *   **If Tool Detected**:
-        1.  Parse the inner content (JSON) -> `{"q": "...", "k": 3}`.
-        2.  `await` the Tool Execution (e.g., `send_web_command`). **(GPU is free now!)**
-        3.  Format result: `<tool_result>{result}</tool_result>\n`.
-        4.  Append Tool Result to `trajectory.messages`.
-        5.  Put Trajectory back in **Queue**.
-    *   **If EOS or `<solution>`**:
-        1.  Save final trajectory to JSONL.
-        2.  Mark as COMPLETED.
+#### B. Tool Workers (Execution)
+*   **Role**: Handle external I/O (Azure Service Bus, etc.).
+*   **Concurrency**: Configurable (e.g., `MAX_TOOL_WORKERS = 32`). Uses `asyncio` to handle thousands of waiting states without blocking.
+*   **Logic**:
+    1.  Pop `Trajectory` from `ToolQueue`.
+    2.  Extract the JSON payload from the last message.
+    3.  Call the appropriate async tool function (`send_web_command`, etc.).
+    4.  **Wait** for the result (non-blocking).
+    5.  Format the result as `<tool_result>...</tool_result>`.
+    6.  Append to `Trajectory` history.
+    7.  Push back to `TaskQueue`.
 
 ## Implementation Details
 
 ### File: `batch_orchestrator.py`
 
-This file will be implemented in Phase 2.
-
 **Dependencies:**
 - `aiohttp`: For async HTTP requests to Proxy.
-- `asyncio`: For managing the Queue and Workers.
+- `asyncio`: For managing the Queues and Worker tasks.
 - `serving.communication` modules: For executing actual tools.
 - `serving.parser`: Reuse `stream_parser` logic.
 
-### Example Logic (Simplified)
+### Pseudo-Code
 
 ```python
-async def worker_loop(self):
-    while True:
-        traj = await self.queue.get()
+class AsyncBatchOrchestrator:
+    def __init__(self):
+        self.task_queue = asyncio.Queue()  # For GPU
+        self.tool_queue = asyncio.Queue()  # For Tools
         
-        # 1. Call GPU
-        response = await self.call_gpu(traj.messages)
+        # Concurrency Limits
+        self.num_gpu_workers = 64
+        self.num_tool_workers = 32
         
-        # 2. Check Interception (reuse serving/parser.py logic)
-        tool_call = stream_parser(response)
+    async def start(self):
+        # Start pure async consumers
+        gpu_tasks = [asyncio.create_task(self.gpu_worker()) 
+                     for _ in range(self.num_gpu_workers)]
+        tool_tasks = [asyncio.create_task(self.tool_worker()) 
+                      for _ in range(self.num_tool_workers)]
         
-        if tool_call:
-            tool_type = tool_call["type"]
-            content = tool_call["content"]
-            
-            # 3. Execute Tool (Async/Slow)
-            if tool_type == "web":
-                result = await self.execute_web_tool(content)
-            elif tool_type == "code":
-                result = await self.execute_code_tool(content)
-            elif tool_type == "azure":
-                result = await self.execute_azure_tool(content)
-            
-            # 4. Update & Re-Queue
-            # Mimic ToolGRPOTrainer format
-            tool_str = f"<{tool_type}>{content}</{tool_type}>"
-            result_str = f"<tool_result>{result}</tool_result>\n"
-            
-            traj.messages.append({"role": "assistant", "content": tool_str})
-            traj.messages.append({"role": "tool", "content": result_str}) # or user role
-            
-            await self.queue.put(traj)
-            
-        else:
-            # 5. Finish
-            if "<solution>" in response or "<eos>" in response:
-                self.save_jsonl(traj)
+        await asyncio.gather(*gpu_tasks, *tool_tasks)
+
+    async def gpu_worker(self):
+        while True:
+            traj = await self.task_queue.get()
+            # Send to vLLM...
+            # If tool detected -> self.tool_queue.put(traj)
+            # Else -> Save
+
+    async def tool_worker(self):
+        while True:
+            traj = await self.tool_queue.get()
+            # Parse tool tag...
+            # result = await run_tool(payload)
+            # traj.history.append(result)
+            # self.task_queue.put(traj)
 ```
 
 ## Why This Design?
 
-1.  **Max GPU Efficiency**: The expensive H100s never wait for Azure. If a tool takes 5 seconds, the GPU serves 10 other requests during that time.
-2.  **Prefix Caching**: When a trajectory is re-queued, vLLM automatically reuses the KV cache from the previous turn, making the "resume" step extremely fast.
-3.  **Consistency**: By strictly following `ToolGRPOTrainer` tag logic (`<web>`, `<tool_result>`, `<solution>`), generated data is instantly training-ready.
+1.  **Zero GPU Blocking**: The GPU never waits for a network request. It processes a token, sees a tool, and immediately moves to the full queue of other tasks.
+2.  **Scalability**: You can independently scale `num_gpu_workers` (to saturate GPU batch size) and `num_tool_workers` (to respect API rate limits).
+3.  **Prefix Caching**: When the `Tool Worker` pushes back to `Task Queue`, the prompt sent to vLLM is `[History + Tool Call + Tool Result]`. The *History + Tool Call* part is identical to the previous run, so vLLM's RadixAttention will skip computation for 99% of the sequence.
+
+## Running DisGenerator
+
+To run the full DisGenerator system on a 4-GPU node (2 Prefill, 2 Decode), follow these steps:
+
+### 1. Start the Disaggregated Logic
+You need to launch the Proxy and the 4 vLLM instances. Assuming you have the existing launch script `scripts/start_all.sh`:
+
+```bash
+# Launch Proxy and vLLM Engines
+./scripts/start_all.sh
+```
+
+*Ensure that your config defaults to `get_config_2p2d()` or explicitly sets it in the launch arguments.*
+
+**LoRA Adapter Configuration:**
+The system uses a LoRA checkpoint from GRPO training. The scripts already include:
+
+```bash
+# These flags are already in start_prefill.sh and start_decode.sh
+--enable-lora \
+--lora-modules grpo-adapter=/path/to/serving/ToolGRPOTrainer/grpo-streamed/checkpoint-10
+```
+
+Set the `LORA_MODULE_PATH` environment variable if your path differs from the default.
+
+### 2. Start the Orchestrator Client
+Run the `simple_client.py` which wraps the `AsyncBatchOrchestrator`. This will load prompts from `prompts.jsonl`, submit them to the proxy, handle tool calls, and save completed trajectories.
+
+```bash
+# Set environment variables for Workers
+export PROXY_URL="http://localhost:10001/v1/chat/completions"
+export NUM_GPU_WORKERS=64
+export NUM_TOOL_WORKERS=32
+
+# Set the LoRA adapter name (must match the name in --lora-modules)
+export MODEL="grpo-adapter"
+
+# Run the Client
+python simple_client.py
+```
+
+### 3. Monitor Output
+*   **Logs**: Check the console output of `simple_client.py` for queue status.
+*   **Data**: Completed trajectories will be appended to `completed_trajectories.jsonl`.

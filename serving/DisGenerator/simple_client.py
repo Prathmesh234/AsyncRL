@@ -1,159 +1,134 @@
 #!/usr/bin/env python3
 """
-Simple client for testing DisGenerator disaggregated serving.
+Orchestrator Client for DisGenerator.
 
-This client sends a single prompt through the proxy server and
-prints the streamed response.
+This script initializes the AsyncBatchOrchestrator, loads prompts from a JSONL file,
+and processes them through the disaggregated serving system with tool support.
 
 Usage:
-    uv run python simple_client.py
-    uv run python simple_client.py "What is the capital of France?"
+    python simple_client.py
 """
 
 import asyncio
 import json
 import os
 import sys
+import logging
+import uuid
+import time
+from typing import List
 
-import aiohttp
+# Add parent directory to path to locate batch_orchestrator
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from batch_orchestrator import AsyncBatchOrchestrator, Trajectory
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
-# Configuration (matches DisTrainer)
-PROXY_URL = os.getenv("PROXY_URL", "http://localhost:10001")
-MODEL = os.getenv("MODEL", "Qwen/Qwen3-4B-Thinking-2507")
-MAX_TOKENS = int(os.getenv("MAX_TOKENS", "20000"))
-SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "")
+# Configuration
+PROXY_URL = os.getenv("PROXY_URL", "http://localhost:10001/v1/chat/completions")
+MODEL = os.getenv("MODEL", "Qwen/Qwen3-4B-Thinking-2507")  # Can be LoRA adapter name
+PROMPTS_FILE = os.path.join(os.path.dirname(__file__), "prompts.jsonl")
+NUM_GPU_WORKERS = int(os.getenv("NUM_GPU_WORKERS", "4"))
+NUM_TOOL_WORKERS = int(os.getenv("NUM_TOOL_WORKERS", "32"))
 
+# Setup Logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [Client] %(message)s')
+logger = logging.getLogger("Client")
 
-async def generate_simple(prompt: str, stream: bool = True) -> str:
-    """
-    Send a single prompt through disaggregated serving.
-    
-    Args:
-        prompt: The user prompt
-        stream: Whether to stream the response
-        
-    Returns:
-        The complete response text
-    """
-    messages = []
-    if SYSTEM_PROMPT:
-        messages.append({"role": "system", "content": SYSTEM_PROMPT})
-    messages.append({"role": "user", "content": prompt})
-
-    payload = {
-        "model": MODEL,
-        "messages": messages,
-        "max_tokens": MAX_TOKENS,
-        "stream": stream,
-        "temperature": 0.7,
-    }
-    
-    url = f"{PROXY_URL}/v1/chat/completions"
-    
-    print(f"\n{'='*60}")
-    print(f"📤 Sending request to: {url}")
-    print(f"📝 Prompt: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
-    print(f"{'='*60}\n")
-    
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=payload) as resp:
-            if resp.status != 200:
-                error_text = await resp.text()
-                print(f"❌ Error: {resp.status} - {error_text}")
-                return ""
-            
-            if stream:
-                # Handle SSE stream
-                full_response = ""
-                print("📥 Response: ", end="", flush=True)
+async def load_prompts(file_path: str) -> List[Trajectory]:
+    """Load prompts from a JSONL file and create Trajectory objects."""
+    trajectories = []
+    try:
+        with open(file_path, 'r') as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                data = json.loads(line)
+                prompt_id = data.get("prompt_id", str(uuid.uuid4()))
+                messages = data.get("messages", [])
                 
-                async for line in resp.content:
-                    line_str = line.decode("utf-8").strip()
-                    
-                    if not line_str:
-                        continue
-                        
-                    if line_str.startswith("data: "):
-                        data_str = line_str[6:]  # Remove "data: " prefix
-                        
-                        if data_str == "[DONE]":
-                            break
-                            
-                        try:
-                            data = json.loads(data_str)
-                            if "choices" in data and len(data["choices"]) > 0:
-                                delta = data["choices"][0].get("delta", {})
-                                content = delta.get("content", "")
-                                if content:
-                                    print(content, end="", flush=True)
-                                    full_response += content
-                        except json.JSONDecodeError:
-                            pass  # Skip malformed lines
-                
-                print("\n")
-                return full_response
-            else:
-                # Non-streaming response
-                data = await resp.json()
-                content = data["choices"][0]["message"]["content"]
-                print(f"📥 Response: {content}")
-                return content
+                # Basic validation
+                if not messages:
+                    logger.warning(f"Skipping empty message for ID {prompt_id}")
+                    continue
 
+                traj = Trajectory(
+                    id=prompt_id,
+                    messages=messages,
+                    completions=[],
+                    status="QUEUED"
+                )
+                trajectories.append(traj)
+    except FileNotFoundError:
+        logger.error(f"Prompts file not found: {file_path}")
+    except json.JSONDecodeError as e:
+         logger.error(f"Error decoding JSONL: {e}")
 
-async def test_health():
-    """Check the health of the proxy server."""
-    url = f"{PROXY_URL}/health"
-    
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(url) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    print(f"✅ Proxy health: {data}")
-                    return data
-                else:
-                    print(f"❌ Proxy unhealthy: {resp.status}")
-                    return None
-        except aiohttp.ClientError as e:
-            print(f"❌ Cannot connect to proxy: {e}")
-            return None
+    return trajectories
 
+async def monitor_progress(orchestrator: AsyncBatchOrchestrator, total_tasks: int):
+    """Monitor and print the progress of the orchestrator."""
+    # This is a placeholder. Real implementation would track completed tasks 
+    # via a shared counter or checking orchestrator state. 
+    # For now, we run indefinitely or until interrupted.
+    logger.info("Monitoring started... (Press Ctrl+C to stop)")
+    while True:
+        # In a real system, checking queue sizes gives an idea of progress
+        q_task = orchestrator.task_queue.qsize()
+        q_tool = orchestrator.tool_queue.qsize()
+        logger.info(f"Queue Status -> Task: {q_task} | Tool: {q_tool}")
+        if q_task == 0 and q_tool == 0:
+             # Very naive completion check - waits for queues to drain. 
+             # Does not account for active workers.
+             # Ideally orchestrator exposes an active_count.
+             pass
+        await asyncio.sleep(5)
 
 async def main():
-    """Main entry point."""
-    print("\n" + "="*60)
-    print("DisGenerator Simple Client")
-    print("="*60)
-    print(f"  Proxy URL: {PROXY_URL}")
-    print(f"  Model: {MODEL}")
-    print(f"  Max tokens: {MAX_TOKENS}")
-    print("="*60 + "\n")
-    
-    # Check health first
-    health = await test_health()
-    if not health:
-        print("\n⚠️  Proxy server not available. Make sure to run:")
-        print("    ./scripts/start_all.sh")
-        return
-    
-    # Get prompt from command line or use default
-    if len(sys.argv) > 1:
-        prompt = " ".join(sys.argv[1:])
-    else:
-        prompt = "What is the capital of France? Answer in one sentence."
-    
-    # Generate response
-    response = await generate_simple(prompt)
-    
-    print("="*60)
-    print("✅ Test complete!")
-    print(f"📏 Response length: {len(response)} characters")
-    print("="*60)
+    print(f"\n{'='*60}")
+    print("DisGenerator Orchestrator Client")
+    print(f"{'='*60}")
+    print(f"  Proxy URL     : {PROXY_URL}")
+    print(f"  Model         : {MODEL}")
+    print(f"  Prompts File  : {PROMPTS_FILE}")
+    print(f"  GPU Workers   : {NUM_GPU_WORKERS}")
+    print(f"  Tool Workers  : {NUM_TOOL_WORKERS}")
+    print(f"{'='*60}\n")
 
+    # 1. Initialize Orchestrator
+    orchestrator = AsyncBatchOrchestrator(
+        proxy_url=PROXY_URL,
+        model=MODEL,
+        num_gpu_workers=NUM_GPU_WORKERS,
+        num_tool_workers=NUM_TOOL_WORKERS
+    )
+
+    # 2. Start Workers
+    await orchestrator.start()
+
+    # 3. Load Prompts
+    trajectories = await load_prompts(PROMPTS_FILE)
+    logger.info(f"Loaded {len(trajectories)} trajectories.")
+
+    # 4. Enqueue Tasks
+    for traj in trajectories:
+        await orchestrator.add_trajectory(traj)
+
+    # 5. Monitor execution
+    try:
+        # For this simple client, we just wait for user interrupt or until logic finishes
+        # A more robust client would collect results and save to file.
+        await monitor_progress(orchestrator, len(trajectories))
+    except asyncio.CancelledError:
+        logger.info("Client cancelled.")
+    finally:
+        await orchestrator.stop()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Stopped by user.")
