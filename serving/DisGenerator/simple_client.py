@@ -38,6 +38,11 @@ OUTPUT_DIR = os.getenv("OUTPUT_DIR", os.path.abspath(os.path.join(os.path.dirnam
 NUM_GPU_WORKERS = int(os.getenv("NUM_GPU_WORKERS", "4"))
 NUM_TOOL_WORKERS = int(os.getenv("NUM_TOOL_WORKERS", "32"))
 
+# Orchestration Hyperparameters
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "4")) # Number of prompts per batch
+NUM_COMPLETIONS = int(os.getenv("NUM_COMPLETIONS", "4")) # Number of completions per prompt (GRPO group size)
+GENERATION_TEMPERATURE = float(os.getenv("GENERATION_TEMPERATURE", "0.9"))
+
 # System prompt from .env (matches ToolGRPOTrainer)
 SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "")
 

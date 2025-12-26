@@ -53,7 +53,14 @@ def compute_grpo_loss(
         
         # Compute normalized advantages
         mean_reward = rewards.mean()
-        std_reward = rewards.std() + 1e-8
+        std_reward = rewards.std()
+        
+        # If std is 0 or NaN (e.g. 1 sample), use 1.0 to avoid division by zero/NaN
+        if torch.isnan(std_reward) or std_reward == 0:
+            std_reward = torch.tensor(1.0, device="cuda", dtype=torch.float32)
+        else:
+            std_reward = std_reward + 1e-8
+            
         advantages = (rewards - mean_reward) / std_reward
         
         # 2. Forward pass for each completion

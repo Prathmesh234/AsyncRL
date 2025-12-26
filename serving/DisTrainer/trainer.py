@@ -180,6 +180,9 @@ class Trainer:
         # Ensure entire model is in bfloat16 to match FSDP expectation
         model = model.to(torch.bfloat16)
         
+        # Enable gradient checkpointing to save memory
+        model.gradient_checkpointing_enable()
+        
         return model, tokenizer
     
     def _try_resume(self):

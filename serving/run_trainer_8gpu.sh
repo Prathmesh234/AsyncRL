@@ -72,4 +72,4 @@ fi
 # Note: CUDA_VISIBLE_DEVICES makes GPU indices 0,1,2,3 inside the process
 # We add ".." to PYTHONPATH so we can run DisTrainer as a module from inside its directory
 export PYTHONPATH=..:$PYTHONPATH
-torchrun --nproc_per_node=4 -m DisTrainer.train --config config/train_config.toml
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True uv run torchrun --nproc_per_node=4 -m DisTrainer.train --config config/train_config.toml

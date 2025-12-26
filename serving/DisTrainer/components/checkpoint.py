@@ -125,15 +125,20 @@ class CheckpointManager:
         
         return step
     
+    def _is_valid_dcp_checkpoint(self, path: Path) -> bool:
+        """Check if a directory is a valid DCP checkpoint (has .metadata file)."""
+        return (path / ".metadata").exists()
+    
     def _get_latest_policy_version(self) -> Optional[int]:
-        """Get the latest policy version number."""
+        """Get the latest policy version number (only considers valid DCP checkpoints)."""
         max_version = None
         pattern = re.compile(r"policy-(\d+)")
         
         for path in self.checkpoint_dir.iterdir():
             if path.is_dir():
                 match = pattern.match(path.name)
-                if match:
+                # Only consider directories with .metadata (valid DCP checkpoints)
+                if match and self._is_valid_dcp_checkpoint(path):
                     version = int(match.group(1))
                     if max_version is None or version > max_version:
                         max_version = version
@@ -171,7 +176,10 @@ class CheckpointManager:
             for version, ckpt_path in policies[:-self.keep_latest_k]:
                 if is_main_rank():
                     print(f"🗑️ Removing old checkpoint: {ckpt_path.name}")
-                shutil.rmtree(ckpt_path)
+                try:
+                    shutil.rmtree(ckpt_path)
+                except OSError as e:
+                    print(f"⚠️ Failed to remove old checkpoint {ckpt_path.name}: {e}")
     
     def list_checkpoints(self) -> list:
         """List all available policy versions."""
@@ -187,11 +195,13 @@ class CheckpointManager:
         return sorted(policies)
     
     def has_checkpoint(self) -> bool:
-        """Check if any policy checkpoint exists."""
+        """Check if any valid DCP policy checkpoint exists."""
         pattern = re.compile(r"policy-\d+")
         for path in self.checkpoint_dir.iterdir():
             if path.is_dir() and pattern.match(path.name):
-                return True
+                # Only count directories with .metadata as valid checkpoints
+                if self._is_valid_dcp_checkpoint(path):
+                    return True
         return False
 
     def _update_latest_symlink(self, latest_path: Path):
