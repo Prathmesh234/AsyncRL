@@ -6,8 +6,47 @@ prefill-decode architecture.
 """
 
 import os
+import re
+import glob
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, Optional
+from pathlib import Path
+
+
+# Path to DisTrainer models directory (where policies are stored)
+DISTRAINER_MODELS_DIR = os.getenv(
+    "DISTRAINER_MODELS_DIR",
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "DisTrainer", "models"))
+)
+
+
+def get_latest_policy_path() -> Optional[str]:
+    """
+    Get the path to the latest policy checkpoint from DisTrainer/models.
+    
+    Returns:
+        Path to the latest policy directory, or None if not found
+    """
+    if not os.path.exists(DISTRAINER_MODELS_DIR):
+        return None
+    
+    policies = []
+    pattern = re.compile(r"policy-(\d+)")
+    
+    for entry in os.listdir(DISTRAINER_MODELS_DIR):
+        full_path = os.path.join(DISTRAINER_MODELS_DIR, entry)
+        if os.path.isdir(full_path):
+            match = pattern.match(entry)
+            if match:
+                version = int(match.group(1))
+                policies.append((version, full_path))
+    
+    if not policies:
+        return None
+    
+    # Return path with highest version
+    policies.sort(key=lambda x: x[0])
+    return policies[-1][1]
 
 
 @dataclass
@@ -38,8 +77,13 @@ class ServerConfig:
 class DisGeneratorConfig:
     """Main configuration for DisGenerator."""
     
-    # Model configuration (matches DisTrainer)
+    # Model configuration (base model - matches DisTrainer)
     model: str = os.getenv("MODEL", "Qwen/Qwen3-4B-Thinking-2507")
+    
+    # LoRA adapter path - auto-detect latest policy from DisTrainer/models
+    # Set to None to not use any adapter
+    adapter_path: Optional[str] = field(default_factory=get_latest_policy_path)
+    
     dtype: str = "float16"
     max_model_len: int = 32768
     max_num_batched_tokens: int = 32768

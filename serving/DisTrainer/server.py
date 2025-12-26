@@ -150,50 +150,109 @@ def init_trainer(config_path: str):
     trainer = Trainer(config)
     return trainer
 
-def distributed_worker(trainer_instance: Trainer):
+def distributed_worker(trainer_instance: Trainer, auto_train: bool = True, poll_interval: float = 5.0):
     """
     Main Loop for ALL Ranks (0, 1, ...).
     Keeps everyone in sync by broadcasting commands from Rank 0.
+    
+    When auto_train=True (default), automatically:
+    1. Polls for new batch files
+    2. Trains when new data is available
+    3. Saves checkpoint after training
+    4. Deletes processed batch file
+    
+    Args:
+        trainer_instance: The Trainer instance
+        auto_train: If True, automatically train when new batches arrive
+        poll_interval: Seconds between polling for new batches (when idle)
     """
+    last_poll_time = 0
+    
     while True:
-        # 1. Rank 0 checks its local queue for new commands
+        # 1. Rank 0 checks for commands OR polls for auto-training
         cmd_data = None
         if is_main_rank():
+            # First check for explicit HTTP commands
             if not cmd_queue.empty():
                 cmd_data = cmd_queue.get()
-            else:
-                cmd_data = None # Nothing to do
+            # If auto-train enabled and no explicit command, check for new batches
+            elif auto_train:
+                current_time = time.time()
+                if current_time - last_poll_time >= poll_interval:
+                    last_poll_time = current_time
+                    
+                    # Check if there are new batches available
+                    if trainer_instance.data_loader.count_available() > 0:
+                        # Auto-generate a TRAIN command
+                        cmd_data = {
+                            "type": Command.TRAIN,
+                            "payload": 1,  # Process 1 batch at a time
+                            "id": f"auto-{uuid.uuid4().hex[:8]}",
+                            "auto": True  # Mark as auto-generated
+                        }
+                        print(f"📦 New batch detected! Starting auto-training...")
         
         # 2. Broadcast the decision (Command or None) to everyone
-        # Wrap in list because broadcast_object_list requires a list
         object_list = [cmd_data]
         dist.broadcast_object_list(object_list, src=0)
         cmd_data = object_list[0]
         
         # 3. Process the command
         if cmd_data is None:
-            time.sleep(0.01) # Avoid burning CPU
+            time.sleep(0.1)  # Avoid burning CPU when idle
             continue
             
         cmd_type = cmd_data.get("type")
         cmd_id = cmd_data.get("id")
+        is_auto = cmd_data.get("auto", False)
         
         # --- Handle TRAIN ---
         if cmd_type == Command.TRAIN:
             num_steps = cmd_data["payload"]
             metrics_list = []
+            batch_files_to_delete = []
             
             # Everyone runs the training steps in lockstep
-            for _ in range(num_steps):
+            for step_i in range(num_steps):
+                # Track which batch file we're about to process (for deletion)
+                if is_main_rank():
+                    next_batch = trainer_instance.data_loader.peek_next_batch_file()
+                    if next_batch:
+                        batch_files_to_delete.append(next_batch)
+                
                 m = trainer_instance.train_step()
                 metrics_list.append(m)
                 
                 # If no data, everyone stops together
                 if m.get("status") == "no_data":
+                    if is_main_rank() and is_auto:
+                        print("⏳ No more batches available. Waiting for new data...")
                     break
+                    
+                # Log progress
+                if is_main_rank():
+                    loss = m.get("loss", 0)
+                    avg_reward = m.get("avg_reward", 0)
+                    step = m.get("step", 0)
+                    print(f"✅ Step {step}: loss={loss:.4f}, avg_reward={avg_reward:.3f}")
             
-            # Only Rank 0 reports results back to HTTP
-            if is_main_rank():
+            # Auto-training: save checkpoint and delete processed batch file
+            if is_auto and metrics_list and metrics_list[-1].get("status") != "no_data":
+                # Save checkpoint after each batch
+                trainer_instance.save_checkpoint()
+                
+                # Delete processed batch files (only on rank 0)
+                if is_main_rank():
+                    for batch_file in batch_files_to_delete:
+                        try:
+                            if batch_file.exists():
+                                batch_file.unlink()
+                                print(f"🗑️ Deleted processed batch: {batch_file.name}")
+                        except Exception as e:
+                            print(f"⚠️ Failed to delete {batch_file}: {e}")
+            
+            # Only Rank 0 reports results back to HTTP (for manual /train calls)
+            if is_main_rank() and not is_auto:
                 cmd_results[cmd_id] = metrics_list
                 
         # --- Handle CHECKPOINT ---

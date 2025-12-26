@@ -115,16 +115,25 @@ async def main():
     print(f"  System Prompt : {'Yes (' + str(len(SYSTEM_PROMPT)) + ' chars)' if SYSTEM_PROMPT else 'No'}")
     print(f"  GPU Workers   : {NUM_GPU_WORKERS}")
     print(f"  Tool Workers  : {NUM_TOOL_WORKERS}")
+    print(f"  ─────────────────────────────")
+    print(f"  GRPO Hyperparameters:")
+    print(f"  Batch Size    : {BATCH_SIZE} prompts ({BATCH_SIZE * NUM_COMPLETIONS} trajectories)")
+    print(f"  Completions   : {NUM_COMPLETIONS} per prompt")
+    print(f"  Temperature   : {GENERATION_TEMPERATURE}")
     print(f"{'='*60}\n")
 
     # 1. Initialize Orchestrator
+    # batch_size in orchestrator is number of TRAJECTORIES (prompts * completions)
     orchestrator = AsyncBatchOrchestrator(
         proxy_url=PROXY_URL,
         model=MODEL,
         tokenizer_name=TOKENIZER,
         num_gpu_workers=NUM_GPU_WORKERS,
         num_tool_workers=NUM_TOOL_WORKERS,
-        output_dir=OUTPUT_DIR
+        output_dir=OUTPUT_DIR,
+        batch_size=BATCH_SIZE * NUM_COMPLETIONS,  # Convert prompt count to trajectory count
+        num_completions_per_prompt=NUM_COMPLETIONS,
+        generation_temperature=GENERATION_TEMPERATURE
     )
 
     # 2. Start Workers

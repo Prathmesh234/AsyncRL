@@ -1,6 +1,11 @@
 """
 CheckpointManager using Distributed Checkpointing (DCP).
 Based on TorchTitan's checkpoint management pattern.
+
+Policy naming convention: policy-{N}-{YYYYMMDD_HHMMSS}
+- policy-0-initial: Starting checkpoint (from ToolGRPOTrainer)
+- policy-1-20251226_131234: First trained policy
+- policy-2-20251226_143456: Second trained policy
 """
 
 import shutil
@@ -8,6 +13,8 @@ import torch
 import torch.distributed.checkpoint as dcp
 from pathlib import Path
 from typing import Dict, Any, Optional
+from datetime import datetime
+import re
 
 from ..mesh import is_main_rank
 
@@ -24,27 +31,52 @@ class CheckpointManager:
         Initialize CheckpointManager.
         
         Args:
-            checkpoint_dir: Directory to save checkpoints
+            checkpoint_dir: Directory to save checkpoints (e.g., DisTrainer/models)
             keep_latest_k: Number of recent checkpoints to keep
         """
         self.checkpoint_dir = Path(checkpoint_dir)
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.keep_latest_k = keep_latest_k
     
+    def _get_next_policy_version(self) -> int:
+        """Get the next policy version number by scanning existing policies."""
+        max_version = -1
+        pattern = re.compile(r"policy-(\d+)")
+        
+        for path in self.checkpoint_dir.iterdir():
+            if path.is_dir():
+                match = pattern.match(path.name)
+                if match:
+                    version = int(match.group(1))
+                    max_version = max(max_version, version)
+        
+        return max_version + 1
+    
     def save(self, state_dict: Dict[str, Any], step: int) -> str:
         """
         Save a sharded checkpoint using DCP.
         Each rank saves its own shard.
         
+        Names checkpoints as: policy-{N}-{YYYYMMDD_HHMMSS}
+        
         Args:
             state_dict: Dictionary containing model and optimizer state
-            step: Current training step
+            step: Current training step (included in metadata)
         
         Returns:
             Path to the saved checkpoint
         """
-        checkpoint_path = self.checkpoint_dir / f"step_{step:06d}"
+        # Get next policy version
+        policy_version = self._get_next_policy_version()
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        checkpoint_name = f"policy-{policy_version}-{timestamp}"
+        checkpoint_path = self.checkpoint_dir / checkpoint_name
         checkpoint_path.mkdir(exist_ok=True)
+        
+        # Add step to state_dict for reference
+        state_dict["step"] = step
+        state_dict["policy_version"] = policy_version
         
         dcp.save(
             state_dict=state_dict,
@@ -55,64 +87,112 @@ class CheckpointManager:
         if is_main_rank():
             self._cleanup_old_checkpoints()
             self._update_latest_symlink(checkpoint_path)
+            print(f"💾 Saved checkpoint: {checkpoint_name} (step {step})")
         
         return str(checkpoint_path)
+
     
     def load(self, state_dict: Dict[str, Any], step: Optional[int] = None) -> int:
         """
-        Load a checkpoint from step or latest.
+        Load a checkpoint (latest policy or specific policy version).
         
         Args:
             state_dict: Dictionary to load state into (model and optimizer)
-            step: Specific step to load, or None for latest
+            step: Specific policy version to load, or None for latest
         
         Returns:
-            The step number that was loaded
+            The policy version that was loaded
         """
         if step is None:
-            step = self._get_latest_step()
+            step = self._get_latest_policy_version()
         
         if step is None:
-            raise ValueError("No checkpoints found")
+            raise ValueError("No policy checkpoints found")
         
-        checkpoint_path = self.checkpoint_dir / f"step_{step:06d}"
+        # Find the checkpoint directory for this policy version
+        checkpoint_path = self._find_policy_path(step)
         
-        if not checkpoint_path.exists():
-            raise ValueError(f"Checkpoint at step {step} not found")
+        if checkpoint_path is None or not checkpoint_path.exists():
+            raise ValueError(f"Policy version {step} not found")
         
         dcp.load(
             state_dict=state_dict,
             checkpoint_id=str(checkpoint_path)
         )
         
+        if is_main_rank():
+            print(f"📂 Loaded checkpoint: {checkpoint_path.name}")
+        
         return step
     
-    def _get_latest_step(self) -> Optional[int]:
-        """Get the latest checkpoint step number."""
-        checkpoints = sorted(self.checkpoint_dir.glob("step_*"))
-        if not checkpoints:
-            return None
+    def _get_latest_policy_version(self) -> Optional[int]:
+        """Get the latest policy version number."""
+        max_version = None
+        pattern = re.compile(r"policy-(\d+)")
         
-        # Extract step number from directory name
-        latest = checkpoints[-1].name
-        return int(latest.replace("step_", ""))
+        for path in self.checkpoint_dir.iterdir():
+            if path.is_dir():
+                match = pattern.match(path.name)
+                if match:
+                    version = int(match.group(1))
+                    if max_version is None or version > max_version:
+                        max_version = version
+        
+        return max_version
+    
+    def _find_policy_path(self, version: int) -> Optional[Path]:
+        """Find the checkpoint path for a specific policy version."""
+        pattern = re.compile(rf"policy-{version}-")
+        
+        for path in self.checkpoint_dir.iterdir():
+            if path.is_dir() and pattern.match(path.name):
+                return path
+        
+        return None
     
     def _cleanup_old_checkpoints(self):
-        """Keep only the latest K checkpoints."""
-        checkpoints = sorted(self.checkpoint_dir.glob("step_*"))
+        """Keep only the latest K policy checkpoints."""
+        # Collect all policy directories with their versions
+        policies = []
+        pattern = re.compile(r"policy-(\d+)")
         
-        if len(checkpoints) > self.keep_latest_k:
-            for ckpt in checkpoints[:-self.keep_latest_k]:
-                shutil.rmtree(ckpt)
+        for path in self.checkpoint_dir.iterdir():
+            if path.is_dir():
+                match = pattern.match(path.name)
+                if match:
+                    version = int(match.group(1))
+                    policies.append((version, path))
+        
+        # Sort by version
+        policies.sort(key=lambda x: x[0])
+        
+        # Remove old ones (keep latest K)
+        if len(policies) > self.keep_latest_k:
+            for version, ckpt_path in policies[:-self.keep_latest_k]:
+                if is_main_rank():
+                    print(f"🗑️ Removing old checkpoint: {ckpt_path.name}")
+                shutil.rmtree(ckpt_path)
     
     def list_checkpoints(self) -> list:
-        """List all available checkpoints."""
-        checkpoints = sorted(self.checkpoint_dir.glob("step_*"))
-        return [int(ckpt.name.replace("step_", "")) for ckpt in checkpoints]
+        """List all available policy versions."""
+        policies = []
+        pattern = re.compile(r"policy-(\d+)")
+        
+        for path in self.checkpoint_dir.iterdir():
+            if path.is_dir():
+                match = pattern.match(path.name)
+                if match:
+                    policies.append(int(match.group(1)))
+        
+        return sorted(policies)
     
     def has_checkpoint(self) -> bool:
-        """Check if any checkpoint exists."""
-        return len(list(self.checkpoint_dir.glob("step_*"))) > 0
+        """Check if any policy checkpoint exists."""
+        pattern = re.compile(r"policy-\d+")
+        for path in self.checkpoint_dir.iterdir():
+            if path.is_dir() and pattern.match(path.name):
+                return True
+        return False
 
     def _update_latest_symlink(self, latest_path: Path):
         """Update a symlink named 'latest_adapter' to the latest checkpoint."""

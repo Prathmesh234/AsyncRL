@@ -60,6 +60,7 @@ def compute_grpo_loss(
         for i, completion in enumerate(completions):
             completion_ids = completion["completion_ids"]
             old_logprobs = completion.get("old_logprobs", None)
+            action_mask = completion.get("action_mask", None)
             
             # Concatenate prompt + completion
             input_ids = torch.tensor(
@@ -68,7 +69,6 @@ def compute_grpo_loss(
                 dtype=torch.long
             ).unsqueeze(0)  # Add batch dimension
             
-            # Get new logprobs from current policy
             # Get new logprobs from current policy
             # Note: mixed precision context handled by FSDP, but explicit cast ensures safety
             with torch.amp.autocast('cuda', dtype=torch.bfloat16):
@@ -83,8 +83,9 @@ def compute_grpo_loss(
             prompt_len = len(prompt_ids)
             completion_len = len(completion_ids)
             
-            # Extract completion log probs
+            # Extract completion log probs (only for tokens where action_mask=1)
             completion_logprobs = []
+            masked_old_logprobs = []
             
             # The logit at index i predicts the token at index i+1
             # To predict the first completion token (at index prompt_len), 
@@ -92,6 +93,10 @@ def compute_grpo_loss(
             start_logit_idx = prompt_len - 1
             
             for t in range(completion_len):
+                # Skip if action_mask is 0 (tool result token)
+                if action_mask is not None and t < len(action_mask) and action_mask[t] == 0:
+                    continue
+                    
                 logit_idx = start_logit_idx + t
                 
                 # Ensure we don't go out of bounds
@@ -100,11 +105,15 @@ def compute_grpo_loss(
                     target_token = input_ids[0, logit_idx + 1]
                     token_logprob = log_probs[0, logit_idx, target_token]
                     completion_logprobs.append(token_logprob)
+                    
+                    # Also collect corresponding old logprob for KL
+                    if old_logprobs is not None and t < len(old_logprobs):
+                        masked_old_logprobs.append(old_logprobs[t])
             
             if len(completion_logprobs) == 0:
                 continue
             
-            # Sum log probs for the completion
+            # Sum log probs for the completion (only model-generated tokens)
             new_logprob_sum = torch.stack(completion_logprobs).sum()
             
             # 3. Compute policy gradient loss
@@ -112,15 +121,15 @@ def compute_grpo_loss(
             policy_loss = -advantages[i] * new_logprob_sum
             
             # 4. Add KL penalty if old_logprobs available
-            if old_logprobs is not None and len(old_logprobs) > 0:
+            if len(masked_old_logprobs) > 0:
                 old_logprob_tensor = torch.tensor(
-                    old_logprobs[:len(completion_logprobs)],
+                    masked_old_logprobs,
                     device="cuda",
                     dtype=torch.float32
                 )
                 new_logprob_tensor = torch.stack(completion_logprobs)
                 
-                # KL divergence: sum(old - new)
+                # KL divergence: sum(old - new) - only for model-generated tokens
                 kl = (old_logprob_tensor - new_logprob_tensor).sum()
                 policy_loss = policy_loss + beta * kl
             

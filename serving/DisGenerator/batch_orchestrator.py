@@ -1,9 +1,11 @@
 import asyncio
+import copy
 import json
 import logging
 import time
 import os
 import sys
+import uuid
 import aiohttp
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
@@ -16,6 +18,16 @@ from communication.command_sender import send_web_command
 from communication.code_command_sender import send_code_command
 from communication.azure_command_sender import send_azure_command
 from parser import stream_parser
+
+# Import helper modules
+from utilities import get_next_batch_number, write_batch_file, ensure_output_dir
+from data_processing import (
+    messages_to_prompt_string,
+    build_trajectory_record,
+    build_completion_text,
+    extract_prompt_messages
+)
+from reward_functions import compute_reward
 
 # Tokenizer for proper token ID extraction
 from transformers import AutoTokenizer
@@ -31,11 +43,15 @@ class Trajectory:
     completions: List[str] = field(default_factory=list)
     # Accumulator for streaming logprobs (token IDs are computed via local tokenizer)
     accumulated_logprobs: List[float] = field(default_factory=list)
+    # Action mask: 1 = model-generated token, 0 = tool result token (skip in loss)
+    action_mask: List[int] = field(default_factory=list)
     status: str = "QUEUED"
     created_at: float = field(default_factory=time.time)
+    # GRPO: Group ID for grouping multiple completions per prompt
+    group_id: str = ""
 
 class AsyncBatchOrchestrator:
-    def __init__(self, proxy_url: str, model: str = "Qwen/Qwen3-4B-Thinking-2507", tokenizer_name: str = "Qwen/Qwen3-4B-Thinking-2507", num_gpu_workers: int = 4, num_tool_workers: int = 32, output_dir: str = None, batch_size: int = 10):
+    def __init__(self, proxy_url: str, model: str = "Qwen/Qwen3-4B-Thinking-2507", tokenizer_name: str = "Qwen/Qwen3-4B-Thinking-2507", num_gpu_workers: int = 4, num_tool_workers: int = 32, output_dir: str = None, batch_size: int = 10, num_completions_per_prompt: int = 4, generation_temperature: float = 1.0):
         self.proxy_url = proxy_url
         self.model = model  # Can be base model or LoRA adapter name
         self.task_queue = asyncio.Queue()  # For GPU tasks
@@ -45,14 +61,17 @@ class AsyncBatchOrchestrator:
         if output_dir is None:
             # Default to DisTrainer's data/generations folder
             output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../DisTrainer/data/generations"))
-        self.output_dir = output_dir
-        os.makedirs(self.output_dir, exist_ok=True)
-        self.batch_counter = self._get_next_batch_number()
+        self.output_dir = ensure_output_dir(output_dir)
+        self.batch_counter = get_next_batch_number(self.output_dir)
         self._batch_lock = asyncio.Lock()
         
         # Batch accumulation - collect N trajectories before writing
         self.batch_size = batch_size
         self._pending_records: List[Dict] = []
+        
+        # GRPO configuration
+        self.num_completions_per_prompt = num_completions_per_prompt
+        self.generation_temperature = generation_temperature
         
         self.num_gpu_workers = num_gpu_workers
         self.num_tool_workers = num_tool_workers
@@ -70,23 +89,6 @@ class AsyncBatchOrchestrator:
         self.max_model_len = 65536  # Model's max context length (64K)
         self.min_completion_tokens = 256  # Minimum tokens to reserve for completion
     
-    def _get_next_batch_number(self) -> int:
-        """Find the next available batch number by checking existing files."""
-        import glob
-        pattern = os.path.join(self.output_dir, "batch_*.jsonl")
-        existing = glob.glob(pattern)
-        if not existing:
-            return 1
-        # Extract numbers and find max
-        numbers = []
-        for f in existing:
-            try:
-                num = int(os.path.basename(f).replace("batch_", "").replace(".jsonl", ""))
-                numbers.append(num)
-            except ValueError:
-                continue
-        return max(numbers) + 1 if numbers else 1
-
     async def start(self):
         """Start all worker tasks."""
         logger.info(f"Starting Orchestrator with {self.num_gpu_workers} GPU workers and {self.num_tool_workers} Tool workers.")
@@ -109,121 +111,68 @@ class AsyncBatchOrchestrator:
         logger.info("Orchestrator stopped.")
 
     async def add_trajectory(self, traj: Trajectory):
-        """Entry point: Add a new trajectory to the system."""
-        await self.task_queue.put(traj)
-        logger.info(f"[Traj {traj.id}] Added to Task Queue")
-
-    def _messages_to_prompt_string(self, messages: List[Dict[str, str]]) -> str:
         """
-        Convert messages list to a plain prompt string.
-        Uses the chat template if available, otherwise concatenates content.
+        Entry point: Add a new trajectory to the system.
+        Spawns num_completions_per_prompt clones for GRPO group-relative training.
+        Each clone shares the same group_id for grouping in the trainer.
         """
-        try:
-            # Use chat template for proper formatting (Qwen uses this)
-            prompt_str = self.tokenizer.apply_chat_template(
-                messages, 
-                tokenize=False, 
-                add_generation_prompt=True
+        # Generate a group_id if not already set
+        group_id = traj.group_id or traj.id or str(uuid.uuid4())
+        
+        # Spawn N clones of this trajectory
+        for i in range(self.num_completions_per_prompt):
+            clone = Trajectory(
+                id=f"{group_id}-{i}",
+                messages=copy.deepcopy(traj.messages),
+                completions=[],
+                accumulated_logprobs=[],
+                action_mask=[],
+                status="QUEUED",
+                group_id=group_id
             )
-            return prompt_str
-        except Exception:
-            # Fallback: simple concatenation
-            parts = []
-            for msg in messages:
-                role = msg.get("role", "user")
-                content = msg.get("content", "")
-                parts.append(f"{role}: {content}")
-            return "\n".join(parts)
+            await self.task_queue.put(clone)
+        
+        logger.info(f"[Group {group_id}] Spawned {self.num_completions_per_prompt} completions for GRPO")
 
     async def save_trajectory(self, traj: Trajectory):
         """
-        Saves the completed trajectory to a JSONL file in the format expected by DisTrainer.
-        Format:
-        {
-            "gen_id": str,
-            "prompt": str,
-            "prompt_ids": List[int],
-            "completions": [
-                {
-                    "text": str,
-                    "completion_ids": List[int],
-                    "old_logprobs": List[float],
-                    "reward": float (placeholder)
-                }
-            ],
-            ...
-        }
+        Saves the completed trajectory to a JSONL file.
+        
+        Each trajectory is saved as an individual record with group_id.
+        The DataLoader groups records by group_id into the format expected by compute_grpo_loss.
+        
+        Computes reward before saving using tool_reward, char_reward, and format_reward.
         """
-        # Find original prompt (system + user messages before any assistant response)
-        prompt_messages = []
-        for msg in traj.messages:
-            role = msg.get("role", "")
-            if role in ["system", "user"]:
-                prompt_messages.append(msg)
-            else:
-                break  # Stop at first non-prompt message
+        # Build completion text for reward computation
+        completion_text = build_completion_text(traj.messages, traj.completions)
         
-        # Convert prompt to string using chat template
-        prompt_str = self._messages_to_prompt_string(prompt_messages)
+        # Extract prompt for reward computation
+        prompt_messages = extract_prompt_messages(traj.messages)
+        prompt_text = messages_to_prompt_string(prompt_messages, self.tokenizer)
         
-        # Build full completion by interleaving accumulated completions with tool results
-        # traj.completions contains assistant outputs from each turn
-        # traj.messages contains tool results after each assistant message
-        completion_parts = []
-        completion_idx = 0
+        # Compute reward (async-safe as it's CPU-bound, run in thread pool)
+        loop = asyncio.get_running_loop()
+        reward = await loop.run_in_executor(
+            None, 
+            compute_reward, 
+            completion_text, 
+            prompt_text,
+            False  # use_grader=False for now (can be enabled later)
+        )
         
-        for msg in traj.messages:
-            role = msg.get("role", "")
-            if role in ["system", "user"]:
-                continue  # Skip prompt messages
-            elif role == "assistant":
-                # Use accumulated completion content
-                if completion_idx < len(traj.completions):
-                    completion_parts.append(traj.completions[completion_idx])
-                    completion_idx += 1
-            elif role == "tool":
-                # Tool result - add it to completion
-                completion_parts.append(msg.get("content", ""))
+        logger.info(f"[Traj {traj.id}] Computed reward: {reward:.3f}")
         
-        full_completion = "\n".join(completion_parts)
-        
-        # Tokenize prompt to get prompt_ids
-        prompt_encoding = self.tokenizer(prompt_str, add_special_tokens=False, return_tensors=None)
-        prompt_ids = prompt_encoding["input_ids"]
-        
-        # Tokenize completion to get completion_ids
-        completion_encoding = self.tokenizer(full_completion, add_special_tokens=False, return_tensors=None)
-        completion_ids = completion_encoding["input_ids"]
-        
-        # Get logprobs - use accumulated if available, otherwise create placeholder
-        # Note: streaming logprobs from vLLM may not align perfectly with tokenizer output
-        # We use the accumulated logprobs and pad/truncate to match completion_ids length
-        old_logprobs = traj.accumulated_logprobs.copy()
-        
-        # Ensure logprobs length matches completion_ids
-        if len(old_logprobs) < len(completion_ids):
-            # Pad with placeholder values
-            old_logprobs.extend([-1.0] * (len(completion_ids) - len(old_logprobs)))
-        elif len(old_logprobs) > len(completion_ids):
-            # Truncate to match
-            old_logprobs = old_logprobs[:len(completion_ids)]
-        
-        record = {
-            "gen_id": traj.id,
-            "prompt": prompt_str,
-            "prompt_ids": prompt_ids,
-            "completions": [{
-                "text": full_completion,
-                "completion_ids": completion_ids,
-                "old_logprobs": old_logprobs,
-                "reward": 0.0  # Placeholder for reward model
-            }],
-            "metadata": {
-                "timestamp": time.time(),
-                "status": "COMPLETED",
-                "num_turns": len(traj.completions)
-            }
-        }
+        # Build the record using data_processing helper
+        record = build_trajectory_record(
+            traj_id=traj.id,
+            group_id=traj.group_id,
+            messages=traj.messages,
+            completions=traj.completions,
+            accumulated_logprobs=traj.accumulated_logprobs,
+            action_mask=traj.action_mask,
+            tokenizer=self.tokenizer,
+            reward=reward
+        )
         # Accumulate record in pending batch
         async with self._batch_lock:
             self._pending_records.append(record)
@@ -239,7 +188,7 @@ class AsyncBatchOrchestrator:
                 
                 # Write batch asynchronously
                 loop = asyncio.get_running_loop()
-                await loop.run_in_executor(None, self._write_batch_file, batch_file, records_to_write)
+                await loop.run_in_executor(None, write_batch_file, batch_file, records_to_write)
                 logger.info(f"[Batch {batch_num}] Saved {len(records_to_write)} trajectories to {batch_file}")
             else:
                 logger.info(f"[Traj {traj.id}] Added to pending batch ({len(self._pending_records)}/{self.batch_size})")
@@ -256,14 +205,8 @@ class AsyncBatchOrchestrator:
                 batch_file = os.path.join(self.output_dir, f"batch_{batch_num:05d}.jsonl")
                 
                 loop = asyncio.get_running_loop()
-                await loop.run_in_executor(None, self._write_batch_file, batch_file, records_to_write)
+                await loop.run_in_executor(None, write_batch_file, batch_file, records_to_write)
                 logger.info(f"[Batch {batch_num}] Flushed {len(records_to_write)} remaining trajectories to {batch_file}")
-
-    def _write_batch_file(self, filepath: str, records: List[Dict]):
-        """Write multiple trajectories to a batch file (one per line)."""
-        with open(filepath, "w") as f:
-            for record in records:
-                f.write(json.dumps(record) + "\n")
 
     async def gpu_worker(self, worker_id: int):
         """
@@ -280,7 +223,7 @@ class AsyncBatchOrchestrator:
                     
                     # Calculate input tokens to set dynamic max_tokens
                     # This prevents "max_tokens too large" errors as conversation grows
-                    prompt_text = self._messages_to_prompt_string(traj.messages)
+                    prompt_text = messages_to_prompt_string(traj.messages, self.tokenizer)
                     input_tokens = len(self.tokenizer(prompt_text, add_special_tokens=False)["input_ids"])
                     available_tokens = self.max_model_len - input_tokens - 100  # 100 token buffer
                     max_tokens = max(self.min_completion_tokens, min(available_tokens, 16000))
@@ -292,7 +235,7 @@ class AsyncBatchOrchestrator:
                         "model": self.model,  # Use configured model (base or LoRA adapter name)
                         "messages": traj.messages,
                         "max_tokens": max_tokens,
-                        "temperature": 0.7,
+                        "temperature": self.generation_temperature,  # GRPO: Use higher temp (1.0) for diverse completions
                         "stream": True,
                         "logprobs": 1, # Request logprobs
                         "stop": self.stop_tokens
@@ -342,7 +285,9 @@ class AsyncBatchOrchestrator:
                                                     if isinstance(token_info, dict):
                                                         # Extract logprob value
                                                         logprob = token_info.get("logprob", 0.0)
-                                                        traj.accumulated_logprobs.append(logprob) 
+                                                        traj.accumulated_logprobs.append(logprob)
+                                                        # Mark as model-generated token (include in loss)
+                                                        traj.action_mask.append(1)
                                                     
                                         if content:
                                             buffer += content
@@ -457,11 +402,21 @@ class AsyncBatchOrchestrator:
                 # Format Result
                 result_str = f"<tool_result>{result}</tool_result>\n"
                 
+                # Tokenize tool result to get token count for action masking
+                # These tokens should NOT contribute to loss (mask = 0)
+                tool_result_tokens = self.tokenizer(result_str, add_special_tokens=False)["input_ids"]
+                num_tool_tokens = len(tool_result_tokens)
+                
+                # Append 0s for tool result tokens (skip in loss)
+                # Also append placeholder logprobs (0.0) to keep arrays aligned
+                traj.action_mask.extend([0] * num_tool_tokens)
+                traj.accumulated_logprobs.extend([0.0] * num_tool_tokens)
+                
                 # Update Trajectory
                 traj.messages.append({"role": "tool", "content": result_str})
                 
                 # Re-queue for GPU Processing (Next Turn)
-                logger.info(f"[Tool-{worker_id}] Finished {tool_type}. Re-queueing Traj {traj.id}")
+                logger.info(f"[Tool-{worker_id}] Finished {tool_type}. Added {num_tool_tokens} masked tokens. Re-queueing Traj {traj.id}")
                 await self.task_queue.put(traj)
                 
             except Exception as e:

@@ -2,11 +2,11 @@
 # Based on TorchTitan architecture patterns
 
 # Model Configuration
-# TODO: Update the path below to your local model directory
-# Example: "/path/to/your/models/Qwen3-4B-Thinking-2507"
+# The base model is Qwen3-4B-Thinking (or locally downloaded version)
 [model]
 name = "Qwen/Qwen3-4B-Thinking-2507"
-adapter_path = "/home/ubuntu/rl-storage/AsyncRL/serving/ToolGRPOTrainer/grpo-streamed/checkpoint-10"
+# Initial adapter from ToolGRPOTrainer checkpoint-10 (now in DisTrainer/models)
+adapter_path = "./models/policy-0-initial"
 use_lora = true
 lora_r = 8
 lora_alpha = 16
@@ -29,12 +29,16 @@ pp = 1   # No pipeline parallelism
 backend = "nccl"
 
 # Data Configuration
+# This is where DisGenerator writes batch files
 [data]
-generations_dir = "/home/ubuntu/rl-storage/AsyncRL/serving/DisTrainer/data/generations_ckpt1000"
+generations_dir = "./data/generations"
 max_sequence_length = 8192
 
 # Checkpoint Configuration
+# Policies are saved as: policy-{N}-{YYYYMMDD_HHMMSS}
+# DisGenerator auto-detects the latest policy from this directory
 [checkpoint]
-save_dir = "./checkpoints/Qwen3-4B-Thinking-Policy-v1"  # Descriptive name for trained weights
+save_dir = "./models"
 save_interval = 10
 keep_latest_k = 3
+

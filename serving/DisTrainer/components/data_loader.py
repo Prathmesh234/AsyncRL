@@ -40,14 +40,36 @@ class DataLoader:
         return None
     
     def _load_jsonl(self, filepath: Path) -> List[Dict[str, Any]]:
-        """Load a JSONL file into a list of dicts."""
-        groups = []
+        """Load a JSONL file and group completions by group_id."""
+        from collections import defaultdict
+        
+        # Read all records
+        records = []
         with open(filepath, 'r') as f:
             for line in f:
                 line = line.strip()
                 if line:
-                    groups.append(json.loads(line))
-        return groups
+                    records.append(json.loads(line))
+        
+        # Hashmap to collect completions by group_id
+        groups = defaultdict(lambda: {"prompt": None, "prompt_ids": None, "completions": []})
+        
+        for r in records:
+            gid = r.get("group_id") or r.get("gen_id")
+            
+            # Store prompt info (only once per group)
+            if groups[gid]["prompt"] is None:
+                groups[gid]["prompt"] = r.get("prompt")
+                groups[gid]["prompt_ids"] = r.get("prompt_ids")
+            
+            # Collect completions (handle both formats)
+            if "completion" in r:
+                groups[gid]["completions"].append(r["completion"])
+            elif "completions" in r:
+                groups[gid]["completions"].extend(r["completions"])
+        
+        # Convert to list
+        return [{"gen_id": gid, **data} for gid, data in groups.items()]
     
     def count_available(self) -> int:
         """Count number of unprocessed JSONL files."""
@@ -77,3 +99,19 @@ class DataLoader:
                 return self._load_jsonl(file)
         
         return None
+    
+    def peek_next_batch_file(self) -> Optional[Path]:
+        """
+        Get the path to the next unprocessed batch file.
+        
+        Returns:
+            Path to next batch file, or None if no new data
+        """
+        available_files = sorted(self.generations_dir.glob("batch_*.jsonl"))
+        
+        for file in available_files:
+            if file not in self.processed_files:
+                return file
+        
+        return None
+
