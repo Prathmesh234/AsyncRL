@@ -17,6 +17,7 @@ dependencies = [
     "rich>=13.0.0",           # Pretty logging
     "httpx>=0.25.0",          # Alternative HTTP client
     "python-dotenv>=1.0.0",   # Environment variable management
+    "azure-servicebus>=7.14.3",
 ]
 
 [project.optional-dependencies]

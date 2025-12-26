@@ -39,12 +39,15 @@ KV_PORT="${3:-22001}"
 # Configuration from environment with defaults (matches DisTrainer)
 MODEL="${MODEL:-Qwen/Qwen3-4B-Thinking-2507}"
 PROXY_PORT="${PROXY_PORT:-30001}"
-MAX_MODEL_LEN="${MAX_MODEL_LEN:-32768}"
+MAX_MODEL_LEN="${MAX_MODEL_LEN:-65536}"
 DTYPE="${DTYPE:-float16}"
 # Lower GPU memory utilization to leave room for incoming KV cache
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.7}"
 LORA_MODULE_NAME="${LORA_MODULE_NAME:-grpo-adapter}"
-LORA_MODULE_PATH="${LORA_MODULE_PATH:-/home/ubuntu/rl-storage/AsyncRL/serving/ToolGRPOTrainer/grpo-streamed/checkpoint-10}"
+# Default LoRA path relative to serving directory (can be overridden via env var)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+DEFAULT_LORA_PATH="$(cd "$SCRIPT_DIR/../../ToolGRPOTrainer/grpo-streamed/checkpoint-10" 2>/dev/null && pwd || echo '')" 
+LORA_MODULE_PATH="${LORA_MODULE_PATH:-$DEFAULT_LORA_PATH}"
 
 # Server identification
 SERVER_ID="decode_gpu${GPU_ID}_port${HTTP_PORT}"

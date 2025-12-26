@@ -29,17 +29,27 @@ load_dotenv()
 
 # Configuration
 PROXY_URL = os.getenv("PROXY_URL", "http://localhost:10001/v1/chat/completions")
-MODEL = os.getenv("MODEL", "Qwen/Qwen3-4B-Thinking-2507")  # Can be LoRA adapter name
+# Use LoRA adapter name for vLLM routing (must match --lora-modules in vLLM)
+MODEL = os.getenv("LORA_ADAPTER_NAME", os.getenv("MODEL", "grpo-adapter"))
+TOKENIZER = os.getenv("TOKENIZER", "Qwen/Qwen3-4B-Thinking-2507")  # Tokenizer for token ID extraction
 PROMPTS_FILE = os.path.join(os.path.dirname(__file__), "prompts.jsonl")
+# Default output to DisTrainer's data/generations folder
+OUTPUT_DIR = os.getenv("OUTPUT_DIR", os.path.abspath(os.path.join(os.path.dirname(__file__), "../DisTrainer/data/generations")))
 NUM_GPU_WORKERS = int(os.getenv("NUM_GPU_WORKERS", "4"))
 NUM_TOOL_WORKERS = int(os.getenv("NUM_TOOL_WORKERS", "32"))
+
+# System prompt from .env (matches ToolGRPOTrainer)
+SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "")
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [Client] %(message)s')
 logger = logging.getLogger("Client")
 
-async def load_prompts(file_path: str) -> List[Trajectory]:
-    """Load prompts from a JSONL file and create Trajectory objects."""
+async def load_prompts(file_path: str, system_prompt: str = "") -> List[Trajectory]:
+    """Load prompts from a JSONL file and create Trajectory objects.
+    
+    If system_prompt is provided, it will be prepended as a system message.
+    """
     trajectories = []
     try:
         with open(file_path, 'r') as f:
@@ -54,6 +64,12 @@ async def load_prompts(file_path: str) -> List[Trajectory]:
                 if not messages:
                     logger.warning(f"Skipping empty message for ID {prompt_id}")
                     continue
+                
+                # Prepend system prompt if provided and not already present
+                if system_prompt:
+                    has_system = any(msg.get("role") == "system" for msg in messages)
+                    if not has_system:
+                        messages = [{"role": "system", "content": system_prompt}] + messages
 
                 traj = Trajectory(
                     id=prompt_id,
@@ -93,7 +109,10 @@ async def main():
     print(f"{'='*60}")
     print(f"  Proxy URL     : {PROXY_URL}")
     print(f"  Model         : {MODEL}")
+    print(f"  Tokenizer     : {TOKENIZER}")
     print(f"  Prompts File  : {PROMPTS_FILE}")
+    print(f"  Output Dir    : {OUTPUT_DIR}")
+    print(f"  System Prompt : {'Yes (' + str(len(SYSTEM_PROMPT)) + ' chars)' if SYSTEM_PROMPT else 'No'}")
     print(f"  GPU Workers   : {NUM_GPU_WORKERS}")
     print(f"  Tool Workers  : {NUM_TOOL_WORKERS}")
     print(f"{'='*60}\n")
@@ -102,16 +121,20 @@ async def main():
     orchestrator = AsyncBatchOrchestrator(
         proxy_url=PROXY_URL,
         model=MODEL,
+        tokenizer_name=TOKENIZER,
         num_gpu_workers=NUM_GPU_WORKERS,
-        num_tool_workers=NUM_TOOL_WORKERS
+        num_tool_workers=NUM_TOOL_WORKERS,
+        output_dir=OUTPUT_DIR
     )
 
     # 2. Start Workers
     await orchestrator.start()
 
-    # 3. Load Prompts
-    trajectories = await load_prompts(PROMPTS_FILE)
+    # 3. Load Prompts (with system prompt from .env)
+    trajectories = await load_prompts(PROMPTS_FILE, system_prompt=SYSTEM_PROMPT)
     logger.info(f"Loaded {len(trajectories)} trajectories.")
+    if SYSTEM_PROMPT:
+        logger.info(f"System prompt injected ({len(SYSTEM_PROMPT)} chars)")
 
     # 4. Enqueue Tasks
     for traj in trajectories:
@@ -125,6 +148,8 @@ async def main():
     except asyncio.CancelledError:
         logger.info("Client cancelled.")
     finally:
+        # Flush any remaining trajectories to disk
+        await orchestrator.flush_pending()
         await orchestrator.stop()
 
 if __name__ == "__main__":
