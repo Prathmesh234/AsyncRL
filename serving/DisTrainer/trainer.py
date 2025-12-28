@@ -207,6 +207,9 @@ class Trainer:
         """
         Execute one training step.
         
+        Note: compute_grpo_loss now accumulates gradients internally via per-completion
+        backward() calls for memory efficiency. We zero gradients BEFORE the loss call.
+        
         Returns:
             Dictionary with training metrics
         """
@@ -217,16 +220,19 @@ class Trainer:
         
         self.model.train()
         
-        # Compute GRPO loss
+        # Zero gradients BEFORE loss computation 
+        # (backward() is called inside compute_grpo_loss for memory efficiency)
+        self.optimizer.zero_grad()
+        
+        # Compute GRPO loss (gradients are accumulated inside)
         loss = compute_grpo_loss(
             self.model,
             batch,
             beta=self.config.training.beta
         )
         
-        # Backward pass
-        self.optimizer.zero_grad()
-        loss.backward()
+        # Note: backward() already called inside compute_grpo_loss
+        # The returned loss is for logging purposes only
         
         # Gradient clipping
         torch.nn.utils.clip_grad_norm_(

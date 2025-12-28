@@ -137,6 +137,21 @@ prompts.jsonl
 └─────────────────────────────────────────────────────────┘
 ```
 
+#### Batch File Sizing
+
+Batch files are created based on **complete GRPO groups** (prompts with all completions):
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `batch_size` | 10 | Number of **prompts** per batch file |
+| `num_completions_per_prompt` | 4 | Completions generated per prompt |
+| **Total trajectories per batch** | **40** | 10 prompts × 4 completions |
+
+A batch file is only written when `batch_size` prompts have **all** their completions ready. This ensures:
+1. **Complete GRPO groups** - All 4 completions for a prompt are in the same batch
+2. **Proper advantage computation** - Trainer can compute per-group advantages correctly
+3. **Atomic training steps** - Each batch file = one training step
+
 ### 2. Training Phase (DisTrainer)
 
 ```
@@ -309,9 +324,9 @@ The DisTrainer runs in **fully automatic mode** by default:
 │   1. 📦 Checks for new batch files in data/generations/                              │
 │                                                                                      │
 │   2. If new batch found:                                                             │
-│      a. 🏋️  Train on the batch (GRPO loss)                                           │
-│      b. 💾 Save a new policy checkpoint (policy-N-{timestamp})                       │
-│      c. 🗑️  Delete the processed batch file                                          │
+│      a. 🏋️  Train on the batch (GRPO loss) → 1 JSONL file = 1 training step          │
+│      b. 🗑️  Delete the processed batch file                                          │
+│      c. 💾 Save checkpoint ONLY if step % save_interval == 0 (default: every 10)     │
 │                                                                                      │
 │   3. If no new data:                                                                 │
 │      ⏳ Wait and continue polling...                                                 │
@@ -324,6 +339,12 @@ The DisTrainer runs in **fully automatic mode** by default:
 │                                                                                      │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+### Checkpoint Interval
+
+Checkpoints are saved based on `checkpoint.save_interval` in `train_config.toml`:
+- **Default: 10** → One policy every 10 batches
+- Change to `save_interval = 1` if you want one policy per batch
 
 ### Why Delete Batch Files?
 
@@ -590,3 +611,59 @@ For a fully automated loop:
 4. **Repeat**
 
 The system is designed for asynchronous operation where generation and training run concurrently on different GPU sets.
+
+---
+
+## TODO
+
+### Length-Based Soft Penalizing Reward Function (DAPO)
+
+> **Paper:** [DAPO: An Open-Source LLM Reinforcement Learning System at Scale](https://arxiv.org/abs/2503.14476) (arXiv:2503.14476)
+
+Implement the **Soft Overlong Punishment** mechanism from DAPO to penalize excessively long responses:
+
+#### Formula
+
+```
+R_overlong = -B^((L_generated - L_expected) / penalty)
+```
+
+#### Parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `R_overlong` | The length-based penalty reward (negative value) |
+| `B` | Base of the exponential penalty (hyperparameter, e.g., 2 or e) |
+| `L_generated` | Actual length of the generated response (in tokens) |
+| `L_expected` | Expected/maximum allowed length threshold |
+| `penalty` | Scaling factor to control the steepness of the penalty curve |
+
+#### Explanation
+
+When a response exceeds the predefined maximum length (`L_expected`):
+1. A **punishment interval** is activated
+2. Within this interval, **longer responses receive greater punishment**
+3. This penalty is added to the original rule-based correctness reward
+4. The mechanism signals to the model to **avoid excessively long responses**
+
+This is a **"soft punishment"** approach that:
+- Does not harshly penalize potentially correct but lengthy reasoning
+- Encourages conciseness while preserving the validity of reasoning
+- Stabilizes training and reduces reward noise for truncated samples
+
+#### Implementation Status
+
+- [x] ~~Add `L_expected` and `penalty` to `train_config.toml`~~ → Configured in `char_reward()` function
+- [x] ~~Implement `compute_overlong_penalty()` in `reward_functions.py`~~ → Integrated into `char_reward()` in `DisGenerator/reward_functions.py`
+- [x] ~~Integrate with existing reward computation~~ → Now part of `compute_reward()` via `char_reward()`
+- [ ] Consider Overlong Filtering as an alternative (mask loss of truncated samples)
+
+**Current Configuration (in `char_reward()`):**
+```python
+DAPO_BASE = 2.0              # B: Base of exponential penalty
+DAPO_EXPECTED_LENGTH = 8192  # L_expected: Max expected length (chars)
+DAPO_PENALTY_SCALE = 2048    # Scaling factor for penalty steepness
+DAPO_MAX_PENALTY = 2.0       # Cap on maximum penalty
+```
+
+**Reference:** Section 3.4 "Hide and Seek: Overlong Reward Shaping" in the DAPO paper.

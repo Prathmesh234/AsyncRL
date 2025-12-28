@@ -39,6 +39,6 @@ max_sequence_length = 8192
 # DisGenerator auto-detects the latest policy from this directory
 [checkpoint]
 save_dir = "./models"
-save_interval = 10
+save_interval = 1  # Save checkpoint after every batch (1 batch = 1 policy)
 keep_latest_k = 3
 

@@ -236,10 +236,11 @@ def distributed_worker(trainer_instance: Trainer, auto_train: bool = True, poll_
                     step = m.get("step", 0)
                     print(f"✅ Step {step}: loss={loss:.4f}, avg_reward={avg_reward:.3f}")
             
-            # Auto-training: save checkpoint and delete processed batch file
+            # Auto-training: delete processed batch files (checkpoint is handled by trainer interval)
             if is_auto and metrics_list and metrics_list[-1].get("status") != "no_data":
-                # Save checkpoint after each batch
-                trainer_instance.save_checkpoint()
+                # Note: Checkpoint is saved automatically by trainer.train_step() 
+                # based on checkpoint.save_interval config (e.g., every 10 steps)
+                # We DON'T save a checkpoint after every batch - that's too frequent!
                 
                 # Delete processed batch files (only on rank 0)
                 if is_main_rank():

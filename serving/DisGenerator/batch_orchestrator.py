@@ -65,9 +65,11 @@ class AsyncBatchOrchestrator:
         self.batch_counter = get_next_batch_number(self.output_dir)
         self._batch_lock = asyncio.Lock()
         
-        # Batch accumulation - collect N trajectories before writing
-        self.batch_size = batch_size
-        self._pending_records: List[Dict] = []
+        # Batch accumulation - collect N complete GROUPS (prompts) before writing
+        # batch_size now refers to number of PROMPTS, not trajectories
+        # e.g., batch_size=10 with num_completions_per_prompt=4 = 40 trajectories per batch
+        self.batch_size = batch_size  # Number of prompts per batch file
+        self._pending_groups: Dict[str, List[Dict]] = {}  # group_id -> list of records
         
         # GRPO configuration
         self.num_completions_per_prompt = num_completions_per_prompt
@@ -156,8 +158,7 @@ class AsyncBatchOrchestrator:
             None, 
             compute_reward, 
             completion_text, 
-            prompt_text,
-            False  # use_grader=False for now (can be enabled later)
+            prompt_text
         )
         
         logger.info(f"[Traj {traj.id}] Computed reward: {reward:.3f}")
@@ -173,40 +174,71 @@ class AsyncBatchOrchestrator:
             tokenizer=self.tokenizer,
             reward=reward
         )
-        # Accumulate record in pending batch
+        # Accumulate record by group_id for GRPO grouping
         async with self._batch_lock:
-            self._pending_records.append(record)
+            group_id = record.get("group_id", traj.id)
             
-            # When we have batch_size records, write them to a file
-            if len(self._pending_records) >= self.batch_size:
+            # Add to pending group
+            if group_id not in self._pending_groups:
+                self._pending_groups[group_id] = []
+            self._pending_groups[group_id].append(record)
+            
+            # Check if this group is now complete
+            group_size = len(self._pending_groups[group_id])
+            logger.info(f"[Group {group_id}] Completion {group_size}/{self.num_completions_per_prompt}")
+            
+            # Count complete groups (groups with all completions)
+            complete_groups = [
+                g_id for g_id, records in self._pending_groups.items()
+                if len(records) >= self.num_completions_per_prompt
+            ]
+            
+            # When we have batch_size complete groups, write them all to a file
+            if len(complete_groups) >= self.batch_size:
                 batch_num = self.batch_counter
                 self.batch_counter += 1
-                records_to_write = self._pending_records.copy()
-                self._pending_records = []
+                
+                # Collect all records from complete groups
+                records_to_write = []
+                for g_id in complete_groups[:self.batch_size]:
+                    records_to_write.extend(self._pending_groups.pop(g_id))
                 
                 batch_file = os.path.join(self.output_dir, f"batch_{batch_num:05d}.jsonl")
                 
                 # Write batch asynchronously
                 loop = asyncio.get_running_loop()
                 await loop.run_in_executor(None, write_batch_file, batch_file, records_to_write)
-                logger.info(f"[Batch {batch_num}] Saved {len(records_to_write)} trajectories to {batch_file}")
+                logger.info(
+                    f"[Batch {batch_num}] Saved {len(records_to_write)} trajectories "
+                    f"({self.batch_size} groups × {self.num_completions_per_prompt} completions) to {batch_file}"
+                )
             else:
-                logger.info(f"[Traj {traj.id}] Added to pending batch ({len(self._pending_records)}/{self.batch_size})")
+                pending_groups_count = len(self._pending_groups)
+                complete_count = len(complete_groups)
+                logger.info(
+                    f"[Traj {traj.id}] Added to group {group_id}. "
+                    f"Pending: {pending_groups_count} groups ({complete_count} complete, need {self.batch_size})"
+                )
 
     async def flush_pending(self):
-        """Flush any remaining records to a final batch file."""
+        """Flush any remaining records (including incomplete groups) to a final batch file."""
         async with self._batch_lock:
-            if self._pending_records:
+            if self._pending_groups:
                 batch_num = self.batch_counter
                 self.batch_counter += 1
-                records_to_write = self._pending_records.copy()
-                self._pending_records = []
                 
-                batch_file = os.path.join(self.output_dir, f"batch_{batch_num:05d}.jsonl")
+                # Collect all remaining records from all groups
+                records_to_write = []
+                for g_id, records in self._pending_groups.items():
+                    records_to_write.extend(records)
+                self._pending_groups = {}
                 
-                loop = asyncio.get_running_loop()
-                await loop.run_in_executor(None, write_batch_file, batch_file, records_to_write)
-                logger.info(f"[Batch {batch_num}] Flushed {len(records_to_write)} remaining trajectories to {batch_file}")
+                if records_to_write:
+                    batch_file = os.path.join(self.output_dir, f"batch_{batch_num:05d}.jsonl")
+                    
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(None, write_batch_file, batch_file, records_to_write)
+                    logger.info(f"[Batch {batch_num}] Flushed {len(records_to_write)} remaining trajectories to {batch_file}")
 
     async def gpu_worker(self, worker_id: int):
         """

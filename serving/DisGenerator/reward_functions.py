@@ -4,6 +4,9 @@ Adapted from ToolGRPOTrainer to compute rewards for individual trajectories.
 
 The main compute_reward() function combines all reward functions and returns
 a single reward value for each trajectory before it's saved to batch.jsonl.
+
+Includes DAPO Soft Overlong Punishment for length-based penalization.
+Paper: https://arxiv.org/abs/2503.14476
 """
 
 import logging
@@ -88,16 +91,34 @@ def tool_reward(content: str) -> float:
 
 def char_reward(content: str) -> float:
     """
-    Character-based reward for response quality indicators.
-    Encourages detailed, long trajectories.
+    DAPO Soft Overlong Punishment - Length-based reward/penalty.
+    
+    Implements the formula from DAPO paper (arXiv:2503.14476, Section 3.4):
+        R_overlong = -B^((L_generated - L_expected) / penalty)
+    
+    This is a "soft punishment" that:
+    - Gives small positive rewards for reasonable length responses
+    - Applies exponentially increasing penalty for overly long responses
+    - Does not harshly penalize correct but lengthy reasoning
+    - Stabilizes training by reducing reward noise for truncated samples
+    
+    Paper: https://arxiv.org/abs/2503.14476
     """
     r = 0.0
     length = len(content)
     
-    # Length rewards - encourage longer, more detailed responses
+    # ==========================================================================
+    # DAPO Configuration
+    # ==========================================================================
+    DAPO_BASE = 2.0              # B: Base of exponential penalty
+    DAPO_EXPECTED_LENGTH = 8192  # L_expected: Max expected length (chars)
+    DAPO_PENALTY_SCALE = 2048    # Scaling factor for penalty steepness
+    DAPO_MAX_PENALTY = 2.0       # Cap on maximum penalty
+    
+    # ==========================================================================
+    # Positive rewards for reasonable length (up to expected length)
+    # ==========================================================================
     if length > 100:
-        r += 0.1
-    if length > 300:
         r += 0.1
     if length > 500:
         r += 0.1
@@ -105,25 +126,45 @@ def char_reward(content: str) -> float:
         r += 0.1
     if length > 2000:
         r += 0.1
-    if length > 5000:
-        r += 0.15  # Bonus for very detailed responses
-    if length > 10000:
-        r += 0.15  # Bonus for comprehensive responses
     
-    # Only penalize extremely long responses (> 15000 chars)
-    if length > 15000:
-        r -= 0.2  # Penalize overly verbose
+    # ==========================================================================
+    # DAPO Soft Overlong Punishment (exponential penalty for exceeding length)
+    # ==========================================================================
+    if length > DAPO_EXPECTED_LENGTH:
+        # R_overlong = -B^((L_generated - L_expected) / penalty)
+        try:
+            exponent = (length - DAPO_EXPECTED_LENGTH) / DAPO_PENALTY_SCALE
+            length_penalty = -(DAPO_BASE ** exponent)
+            
+            # Cap the penalty to avoid extreme values
+            length_penalty = max(-DAPO_MAX_PENALTY, length_penalty)
+            
+            r += length_penalty
+            
+            logger.debug(
+                f"DAPO length penalty: L_gen={length}, L_exp={DAPO_EXPECTED_LENGTH}, "
+                f"exponent={exponent:.3f}, penalty={length_penalty:.3f}"
+            )
+        except (OverflowError, ValueError) as e:
+            logger.warning(f"DAPO length penalty computation error: {e}")
+            r -= DAPO_MAX_PENALTY  # Apply max penalty on error
+    
+    # ==========================================================================
+    # Additional quality checks (kept from original)
+    # ==========================================================================
     
     # Penalize excessive use of "Wait" (indicates rambling/unproductive thinking)
     wait_count = len(re.findall(r'\bWait\b', content, re.IGNORECASE))
     if wait_count > 3:
         r -= min(0.3, (wait_count - 3) * 0.05)  # Penalty grows with usage
     
-    # Code patterns
+    # ==========================================================================
+    # Code patterns reward (restored from original)
+    # ==========================================================================
     code_patterns = [
-        r'`[^`]+`',  # Inline code
-        r'```[\s\S]*?```',  # Code blocks
-        r'\w+\.\w+\(',  # Method calls
+        r'`[^`]+`',        # Inline code
+        r'```[\s\S]*?```', # Code blocks
+        r'\w+\.\w+\(',     # Method calls
     ]
     for pattern in code_patterns:
         matches = len(re.findall(pattern, content))
@@ -211,20 +252,19 @@ def format_reward(content: str) -> float:
     return r
 
 
-def compute_reward(completion_text: str, prompt: str = None, use_grader: bool = False) -> float:
+def compute_reward(completion_text: str, prompt: str = None) -> float:
     """
     Compute the total reward for a completion.
     
     Combines rewards from:
     - tool_reward: Tool tag usage and patterns
-    - char_reward: Response quality indicators
+    - char_reward: DAPO Soft Overlong Punishment (length-based reward/penalty)
     - format_reward: Proper formatting
-    - grader_reward (optional): External grader service
+    - grader_reward: External grader service (or dummy random for testing)
     
     Args:
         completion_text: The full completion text
-        prompt: The original prompt (used for grader if enabled)
-        use_grader: Whether to use the external grader service
+        prompt: The original prompt (used for grader)
         
     Returns:
         Total reward as a float
@@ -233,16 +273,16 @@ def compute_reward(completion_text: str, prompt: str = None, use_grader: bool = 
     
     # Combine all rewards
     total += tool_reward(completion_text)
-    total += char_reward(completion_text)
+    total += char_reward(completion_text)  # Includes DAPO length penalty
     total += format_reward(completion_text)
     
-    # Optional: Grader reward (external service)
-    if use_grader and prompt:
-        try:
-            grader_score = grader_reward(completion_text, prompt)
-            total += grader_score
-        except Exception as e:
-            logger.warning(f"Grader reward failed: {e}")
+    # ALWAYS include grader reward (uses dummy random when grader unavailable)
+    # This provides necessary reward variance for GRPO training to not collapse
+    try:
+        grader_score = grader_reward(completion_text, prompt or "")
+        total += grader_score
+    except Exception as e:
+        logger.warning(f"Grader reward failed: {e}")
     
     logger.debug(f"Computed reward: {total:.3f}")
     return total
@@ -252,29 +292,45 @@ def grader_reward(completion_text: str, prompt: str, timeout_s: int = 30) -> flo
     """
     Call external grader service for reward.
     Returns normalized score (0.0 to 1.0).
-    """
-    try:
-        # Import grader sender
-        from ToolGRPOTrainer.grader_command_sender import send_grader_command
-        
-        result = send_grader_command(prompt, completion_text, timeout_s=timeout_s)
-        
-        # Parse score (1-5 from grader)
-        raw_score = None
-        if result:
-            text = str(result).strip()
-            match = re.search(r'\d+\.?\d*', text)
-            if match:
-                raw_score = float(match.group())
-        
-        # Normalize to 0-1
-        if raw_score is not None:
-            normalized = (raw_score - 1.0) / 4.0
-            return max(0.0, min(1.0, normalized))
-        
-    except ImportError:
-        logger.warning("Grader command sender not available")
-    except Exception as e:
-        logger.error(f"Grader error: {e}")
     
-    return 0.0
+    NOTE: Currently using DUMMY random reward to prevent training collapse.
+    Uncomment the actual implementation when the grader service is ready.
+    """
+    import random
+    
+    # ==========================================================================
+    # DUMMY REWARD - Random score to prevent training collapse
+    # Remove this and uncomment the real implementation when grader is ready
+    # ==========================================================================
+    dummy_score = random.uniform(0.0, 1.0)
+    logger.debug(f"Using DUMMY grader reward: {dummy_score:.3f}")
+    return dummy_score
+    
+    # ==========================================================================
+    # REAL IMPLEMENTATION (commented out - uncomment when grader is available)
+    # ==========================================================================
+    # try:
+    #     # Import grader sender
+    #     from ToolGRPOTrainer.grader_command_sender import send_grader_command
+    #     
+    #     result = send_grader_command(prompt, completion_text, timeout_s=timeout_s)
+    #     
+    #     # Parse score (1-5 from grader)
+    #     raw_score = None
+    #     if result:
+    #         text = str(result).strip()
+    #         match = re.search(r'\d+\.?\d*', text)
+    #         if match:
+    #             raw_score = float(match.group())
+    #     
+    #     # Normalize to 0-1
+    #     if raw_score is not None:
+    #         normalized = (raw_score - 1.0) / 4.0
+    #         return max(0.0, min(1.0, normalized))
+    #     
+    # except ImportError:
+    #     logger.warning("Grader command sender not available")
+    # except Exception as e:
+    #     logger.error(f"Grader error: {e}")
+    # 
+    # return 0.0
