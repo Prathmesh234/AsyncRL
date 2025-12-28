@@ -198,18 +198,32 @@ class AsyncBatchOrchestrator:
                 batch_num = self.batch_counter
                 self.batch_counter += 1
                 
-                # Collect all records from complete groups
-                records_to_write = []
+                # Build grouped records (one per group with all completions)
+                grouped_records = []
                 for g_id in complete_groups[:self.batch_size]:
-                    records_to_write.extend(self._pending_groups.pop(g_id))
+                    group_records = self._pending_groups.pop(g_id)
+                    
+                    # Take prompt info from first record
+                    first = group_records[0]
+                    grouped_record = {
+                        "group_id": g_id,
+                        "prompt": first.get("prompt"),
+                        "prompt_ids": first.get("prompt_ids"),
+                        "completions": [r.get("completion") for r in group_records],
+                        "metadata": {
+                            "num_completions": len(group_records),
+                            "timestamp": first.get("metadata", {}).get("timestamp")
+                        }
+                    }
+                    grouped_records.append(grouped_record)
                 
                 batch_file = os.path.join(self.output_dir, f"batch_{batch_num:05d}.jsonl")
                 
                 # Write batch asynchronously
                 loop = asyncio.get_running_loop()
-                await loop.run_in_executor(None, write_batch_file, batch_file, records_to_write)
+                await loop.run_in_executor(None, write_batch_file, batch_file, grouped_records)
                 logger.info(
-                    f"[Batch {batch_num}] Saved {len(records_to_write)} trajectories "
+                    f"[Batch {batch_num}] Saved {len(grouped_records)} groups "
                     f"({self.batch_size} groups × {self.num_completions_per_prompt} completions) to {batch_file}"
                 )
             else:
@@ -227,18 +241,30 @@ class AsyncBatchOrchestrator:
                 batch_num = self.batch_counter
                 self.batch_counter += 1
                 
-                # Collect all remaining records from all groups
-                records_to_write = []
-                for g_id, records in self._pending_groups.items():
-                    records_to_write.extend(records)
+                # Build grouped records from all remaining groups
+                grouped_records = []
+                for g_id, group_records in self._pending_groups.items():
+                    if group_records:
+                        first = group_records[0]
+                        grouped_record = {
+                            "group_id": g_id,
+                            "prompt": first.get("prompt"),
+                            "prompt_ids": first.get("prompt_ids"),
+                            "completions": [r.get("completion") for r in group_records],
+                            "metadata": {
+                                "num_completions": len(group_records),
+                                "timestamp": first.get("metadata", {}).get("timestamp")
+                            }
+                        }
+                        grouped_records.append(grouped_record)
                 self._pending_groups = {}
                 
-                if records_to_write:
+                if grouped_records:
                     batch_file = os.path.join(self.output_dir, f"batch_{batch_num:05d}.jsonl")
                     
                     loop = asyncio.get_running_loop()
-                    await loop.run_in_executor(None, write_batch_file, batch_file, records_to_write)
-                    logger.info(f"[Batch {batch_num}] Flushed {len(records_to_write)} remaining trajectories to {batch_file}")
+                    await loop.run_in_executor(None, write_batch_file, batch_file, grouped_records)
+                    logger.info(f"[Batch {batch_num}] Flushed {len(grouped_records)} remaining groups to {batch_file}")
 
     async def gpu_worker(self, worker_id: int):
         """

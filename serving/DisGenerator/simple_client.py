@@ -39,7 +39,7 @@ NUM_GPU_WORKERS = int(os.getenv("NUM_GPU_WORKERS", "4"))
 NUM_TOOL_WORKERS = int(os.getenv("NUM_TOOL_WORKERS", "32"))
 
 # Orchestration Hyperparameters
-BATCH_SIZE = int(os.getenv("BATCH_SIZE", "4")) # Number of prompts per batch
+BATCH_SIZE = 10 # Number of prompts per batch
 NUM_COMPLETIONS = int(os.getenv("NUM_COMPLETIONS", "4")) # Number of completions per prompt (GRPO group size)
 GENERATION_TEMPERATURE = float(os.getenv("GENERATION_TEMPERATURE", "0.9"))
 
@@ -136,7 +136,7 @@ async def main():
         num_gpu_workers=NUM_GPU_WORKERS,
         num_tool_workers=NUM_TOOL_WORKERS,
         output_dir=OUTPUT_DIR,
-        batch_size=BATCH_SIZE * NUM_COMPLETIONS,  # Convert prompt count to trajectory count
+        batch_size=BATCH_SIZE,  # Number of complete GROUPS (prompts) per batch
         num_completions_per_prompt=NUM_COMPLETIONS,
         generation_temperature=GENERATION_TEMPERATURE
     )

@@ -149,7 +149,6 @@ class Trainer:
         )
         
         # Apply LoRA if configured
-        # Apply LoRA if configured
         if self.config.model.use_lora:
             from peft import get_peft_model, LoraConfig, PeftModel
             
@@ -177,11 +176,22 @@ class Trainer:
                 print("LoRA applied to model")
                 model.print_trainable_parameters()
         
-        # Ensure entire model is in bfloat16 to match FSDP expectation
+        # Convert to bfloat16 for memory efficiency
         model = model.to(torch.bfloat16)
         
-        # Enable gradient checkpointing to save memory
-        model.gradient_checkpointing_enable()
+        # Explicitly enable gradients on trainable parameters (LoRA layers)
+        # This is required after dtype conversion
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                param.requires_grad_(True)
+        
+        # Set model to training mode
+        model.train()
+        
+        # NOTE: Gradient checkpointing is disabled because it conflicts with PEFT + FSDP
+        # and causes "None of the inputs have requires_grad=True" errors.
+        # If memory is an issue, reduce batch size instead.
+        # model.gradient_checkpointing_enable()
         
         return model, tokenizer
     
