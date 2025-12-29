@@ -30,6 +30,12 @@ def get_latest_policy_path() -> Optional[str]:
     if not os.path.exists(DISTRAINER_MODELS_DIR):
         return None
     
+    # FIRST: Check for 'latest_adapter' symlink/directory
+    latest_symlink = os.path.join(DISTRAINER_MODELS_DIR, "latest_adapter")
+    if os.path.exists(latest_symlink):
+        return latest_symlink
+
+    # FALLBACK: Scan for explicit policy folders
     policies = []
     pattern = re.compile(r"policy-(\d+)")
     

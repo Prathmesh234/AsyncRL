@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from torch.distributed.checkpoint.state_dict import get_state_dict, StateDictOptions
 
 from .mesh import ParallelDims, build_mesh, init_distributed, is_main_rank
 from .models.qwen3 import apply_fsdp
@@ -129,6 +130,7 @@ class Trainer:
             print(f"Trainer initialized on {config.parallel_dims.dp} GPUs")
             print(f"Model: {config.model.name}")
             print(f"Starting from step: {self.step}")
+            self.metrics_logger.start()
     
     def _build_model(self):
         """Load the model and tokenizer."""
@@ -266,12 +268,24 @@ class Trainer:
         
         self.step += 1
         
-        # Compute average reward from batch
+        # Compute metrics from batch
         all_rewards = []
+        prompt_lengths = []
+        completion_lengths = []
+        
         for group in batch:
+            p_len = len(group.get("prompt_ids", []))
             for completion in group.get("completions", []):
                 all_rewards.append(completion.get("reward", 0.0))
+                # completion_ids might be missing if failed, handle gracefully
+                c_ids = completion.get("completion_ids", [])
+                completion_lengths.append(len(c_ids))
+                prompt_lengths.append(p_len)
+                
         avg_reward = sum(all_rewards) / len(all_rewards) if all_rewards else 0.0
+        avg_prompt_len = sum(prompt_lengths) / len(prompt_lengths) if prompt_lengths else 0.0
+        avg_completion_len = sum(completion_lengths) / len(completion_lengths) if completion_lengths else 0.0
+        max_completion_len = max(completion_lengths) if completion_lengths else 0
         
         # Log metrics
         metrics = TrainingMetrics(
@@ -279,6 +293,9 @@ class Trainer:
             loss=loss.item(),
             learning_rate=self.config.training.learning_rate,
             avg_reward=avg_reward,
+            avg_prompt_length=avg_prompt_len,
+            avg_completion_length=avg_completion_len,
+            max_completion_length=max_completion_len,
             batches_processed=len(batch)
         )
         self.metrics_logger.log(metrics)
@@ -305,8 +322,53 @@ class Trainer:
         path = self.checkpoint_manager.save(state_dict, self.step)
         
         if is_main_rank():
-            print(f"Saved checkpoint at step {self.step}")
-        
+            print(f"Saved DCP checkpoint at step {self.step}")
+            
+        # ------------------------------------------------------------------
+        # NEW: Save HF PEFT Adapter for vLLM compatibility
+        # vLLM requires 'adapter_config.json' and 'adapter_model.safetensors'
+        # ------------------------------------------------------------------
+        if self.config.model.use_lora:
+            try:
+                from peft import get_peft_model_state_dict
+                
+                if is_main_rank():
+                    print("Gathering LoRA weights for vLLM export...")
+                
+                # 1. Gather full state dict (cpu offloaded to save GPU mem)
+                # This handles the FSDP2 un-sharding logic transparently
+                options = StateDictOptions(full_state_dict=True, cpu_offload=True)
+                full_state_dict = get_state_dict(self.model, options=options)
+                
+                if is_main_rank():
+                    # 2. Extract only the PEFT adapter weights from the full state dict
+                    # get_peft_model_state_dict filters for only the trainable adapter params
+                    try:
+                        adapter_state_dict = get_peft_model_state_dict(
+                            self.model, 
+                            state_dict=full_state_dict
+                        )
+                        
+                        # 3. Save using PEFT's save_pretrained with the filtered adapter state
+                        self.model.save_pretrained(path, state_dict=adapter_state_dict)
+                        print(f"✅ Saved HF Adapter to {path}")
+                        
+                        del adapter_state_dict
+                    except Exception as e:
+                        print(f"⚠️ Failed to save HF Adapter: {e}")
+                        import traceback
+                        traceback.print_exc()
+                    
+                    # Cleanup the full state dict
+                    del full_state_dict
+                else:
+                    # Other ranks just cleanup
+                    del full_state_dict
+                    
+            except ImportError as e:
+                if is_main_rank():
+                    print(f"⚠️ PEFT not available for HF adapter export: {e}")
+
         return path
     
     def load_checkpoint(self, step: Optional[int] = None) -> int:

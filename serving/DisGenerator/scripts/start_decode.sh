@@ -45,8 +45,16 @@ DTYPE="${DTYPE:-float16}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.7}"
 LORA_MODULE_NAME="${LORA_MODULE_NAME:-grpo-adapter}"
 # Default LoRA path relative to serving directory (can be overridden via env var)
+# Default LoRA path relative to serving directory (can be overridden via env var)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DEFAULT_LORA_PATH="$(cd "$SCRIPT_DIR/../../ToolGRPOTrainer/grpo-streamed/checkpoint-10" 2>/dev/null && pwd || echo '')" 
+DISTRAINER_ADAPTER="$(cd "$SCRIPT_DIR/../../DisTrainer/models/latest_adapter" 2>/dev/null && pwd || echo '')"
+LEGACY_ADAPTER="$(cd "$SCRIPT_DIR/../../ToolGRPOTrainer/grpo-streamed/checkpoint-10" 2>/dev/null && pwd || echo '')"
+
+if [ -n "$DISTRAINER_ADAPTER" ]; then
+    DEFAULT_LORA_PATH="$DISTRAINER_ADAPTER"
+else
+    DEFAULT_LORA_PATH="$LEGACY_ADAPTER"
+fi
 LORA_MODULE_PATH="${LORA_MODULE_PATH:-$DEFAULT_LORA_PATH}"
 
 # Server identification
