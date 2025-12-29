@@ -17,7 +17,8 @@ Disaggregated vLLM Serving: Separates prefill and decode phases across GPUs for 
 AsyncBatchOrchestrator: Manages trajectory generation using a dual-queue architecture
 Task Queue: Holds trajectories awaiting model generation
 Tool Queue: Handles asynchronous tool execution (web search, code execution, Azure CLI)
-Streaming Tool Interception: Monitors token streams in real-time, detects tool calls (<web>, <code>, <azure>), pauses generation, executes tools asynchronously, and resumes with results
+Streaming Tool Interception: Monitors token streams in real-time, detects tool calls (<web>, <code>, <azure>)
+pauses generation, executes tools asynchronously, and resumes with results
 Multi-worker Concurrency:
 GPU Workers (4-64): Handle fast inference via vLLM proxy
 Tool Workers (32+): Execute I/O-bound tool operations without blocking GPU workers
