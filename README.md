@@ -7,9 +7,81 @@ Deepwiki link for in depth documentation - https://deepwiki.com/Prathmesh234/Asy
 
 Medium Blog - https://medium.com/@ppbhatt500/building-asyncrl-a-multi-tool-reinforcement-learning-pipeline-for-software-engineering-tasks-0fde815ed2b4
 
-## Pretty cool Feature
+Distributed Generator and Distributed Trainer 
 
-By default, GRPOTrainer from huggingface does not enable multi turn tool calling while generating tokens for completitions in GRPO. Had to write custom functions to overwrite it (shoutout to codex for helping me out here - You Can find the implementation under ToolGRPOTrainer under serving folder).
+AsyncRL consists of two primary components operating in a continuous feedback loop:
+
+Distributed Generator (DisGenerator)
+
+Disaggregated vLLM Serving: Separates prefill and decode phases across GPUs for maximum throughput
+AsyncBatchOrchestrator: Manages trajectory generation using a dual-queue architecture
+Task Queue: Holds trajectories awaiting model generation
+Tool Queue: Handles asynchronous tool execution (web search, code execution, Azure CLI)
+Streaming Tool Interception: Monitors token streams in real-time, detects tool calls (<web>, <code>, <azure>), pauses generation, executes tools asynchronously, and resumes with results
+Multi-worker Concurrency:
+GPU Workers (4-64): Handle fast inference via vLLM proxy
+Tool Workers (32+): Execute I/O-bound tool operations without blocking GPU workers
+On-Policy Data Generation: Automatically reloads the latest policy checkpoint for each batch, ensuring trajectories reflect the current model state
+
+Distributed Trainer (DisTrainer)
+TorchTitan-Inspired Architecture: Production-grade distributed training with FSDP2 (Fully Sharded Data Parallelism 2)
+Automatic Training Loop: Monitors data/generations/ directory and automatically trains when new batches arrive
+GRPO Loss Computation:
+Groups completions by prompt
+Computes group-relative advantages
+Applies KL regularization against reference policy
+Uses action masks to exclude tool outputs from loss
+Checkpointing: Saves versioned policies as policy-N-{timestamp} using Distributed Checkpoint (DCP)
+HTTP Control Interface: FastAPI endpoints for monitoring and manual control (/train, /status, /checkpoint)
+
+
+
+
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                           ASYNCRL DISTRIBUTED ARCHITECTURE                               │
+├─────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                          │
+│   ┌──────────────────────────────────┐        ┌──────────────────────────────────┐       │
+│   │         DisGenerator             │        │           DisTrainer             │       │
+│   │     (GPUs 0, 1 or 0-3)           │        │       (GPUs 2, 3 or 4-7)         │       │
+│   ├──────────────────────────────────┤        ├──────────────────────────────────┤       │
+│   │                                  │        │                                  │       │
+│   │  Prefill GPU(s)   Decode GPU(s)  │        │     FSDP2 Data Parallel          │       │
+│   │      ↓                 ↓         │        │         Training                 │       │
+│   │  ┌────────┐     ┌────────┐       │        │                                  │       │
+│   │  │ vLLM   │────▶│ vLLM   │       │        │  ┌─────────┐    ┌─────────┐      │       │
+│   │  │Prefill │NCCL │Decode  │       │        │  │ GPU 2   │    │ GPU 3   │      │       │
+│   │  └────────┘     └────────┘       │        │  │ (Shard) │    │ (Shard) │      │       │
+│   │       │              │           │        │  └────┬────┘    └────┬────┘      │       │
+│   │       └──────────────┘           │        │       └──────┬───────┘           │       │
+│   │              │                   │        │              │                   │       │
+│   │      ┌───────▼───────┐           │        │      ┌───────▼───────┐           │       │
+│   │      │   Proxy       │           │        │      │  DataLoader   │           │       │
+│   │      │  (Port 10001) │           │        │      │  (watches)    │           │       │
+│   │      └───────┬───────┘           │        │      └───────┬───────┘           │       │
+│   │              │                   │        │              │                   │       │
+│   │      ┌───────▼───────┐           │        │              │                   │       │
+│   │      │  Orchestrator │           │        │              │                   │       │
+│   │      │  + Tool Calls │           │        │              │                   │       │
+│   │      └───────┬───────┘           │        │              │                   │       │
+│   │              │                   │        │              │                   │       │
+│   └──────────────┼───────────────────┘        └──────────────┼───────────────────┘       │
+│                  │                                           │                           │
+│                  │                                           │                           │
+│                  ▼                                           │                           │
+│   ┌──────────────────────────────────────────────────────────┼───────────────────┐       │
+│   │                    Shared Data Directory                 │                   │       │
+│   │                DisTrainer/data/generations/              │                   │       │
+│   │         batch_00000.jsonl, batch_00001.jsonl, ...        │                   │       │
+│   └──────────────────────────────────────────────────────────────────────────────┘       │
+│                                                                                          │
+│   ┌──────────────────────────────────────────────────────────────────────────────┐       │
+│   │                        Policy Checkpoint Storage                             │       │
+│   │                        DisTrainer/models/                                    │       │
+│   │   policy-0-initial  →  policy-1-20251226_131234  →  policy-2-20251226_143456 │       │
+│   └──────────────────────────────────────────────────────────────────────────────┘       │
+│                                                                                          │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
 
 ## Table of Contents
 
