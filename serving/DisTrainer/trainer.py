@@ -179,6 +179,10 @@ class Trainer:
         # Convert to bfloat16 for memory efficiency
         model = model.to(torch.bfloat16)
         
+        # CRITICAL: Disable use_cache to prevent gradient checkpointing auto-enable
+        # This is necessary because gradient checkpointing conflicts with caching
+        model.config.use_cache = False
+        
         # Explicitly enable gradients on trainable parameters (LoRA layers)
         # This is required after dtype conversion
         for name, param in model.named_parameters():
@@ -188,10 +192,17 @@ class Trainer:
         # Set model to training mode
         model.train()
         
-        # NOTE: Gradient checkpointing is disabled because it conflicts with PEFT + FSDP
-        # and causes "None of the inputs have requires_grad=True" errors.
-        # If memory is an issue, reduce batch size instead.
-        # model.gradient_checkpointing_enable()
+        # Enable gradient checkpointing for memory efficiency
+        # use_reentrant=False is REQUIRED for PEFT/LoRA models to avoid
+        # "None of the inputs have requires_grad=True" errors.
+        # This works because non-reentrant checkpointing doesn't require
+        # input tensors to have requires_grad=True - it tracks gradients differently.
+        model.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs={"use_reentrant": False}
+        )
+        
+        if is_main_rank():
+            print("✅ Gradient checkpointing enabled (use_reentrant=False)")
         
         return model, tokenizer
     

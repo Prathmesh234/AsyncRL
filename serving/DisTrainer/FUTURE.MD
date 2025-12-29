@@ -18,7 +18,97 @@ Leverage PyTorch 2.0+ compilation stack for maximized H100 throughput.
 - **Tensor Parallelism (TP)**: If scaling to larger models (e.g., 70B), integrate TP within the DeviceMesh to shard individual weight matrices.
 - **Overlapped Communication**: Refine FSDP2 settings to overlap the `All-Gather` of Layer N+1 with the computation of Layer N.
 
-## 3. Data Pipeline
+## 3. Context Parallelism (CP) for Long Sequences
+
+Enable training with very long sequences (8K-1M+ tokens) by sharding the sequence dimension across GPUs using Ring Attention.
+
+### What is Context Parallelism?
+
+Context Parallelism reduces peak activation memory by:
+1. **Sharding the sequence dimension** across a CP group (not just parameters like FSDP)
+2. **Ring Attention**: Each GPU holds a slice of the KV cache; attention is computed by rotating KV shards around a "ring" of GPUs
+3. **Memory reduction**: From O(seq_len²) to O(seq_len²/cp_degree)
+
+### Implementation Plan
+
+#### Step 1: Update ParallelDims
+```python
+# mesh.py
+@dataclass
+class ParallelDims:
+    dp: int = 2   # Data parallel
+    cp: int = 1   # Context parallel (NEW)
+    tp: int = 1   # Tensor parallel
+    pp: int = 1   # Pipeline parallel
+```
+
+#### Step 2: Build 2D DeviceMesh
+```python
+def build_mesh(parallel_dims: ParallelDims):
+    if parallel_dims.cp > 1:
+        # 2D mesh: (dp, cp)
+        return init_device_mesh(
+            "cuda",
+            (parallel_dims.dp, parallel_dims.cp),
+            mesh_dim_names=("dp", "cp")
+        )
+    else:
+        return init_device_mesh("cuda", (parallel_dims.dp,), mesh_dim_names=("dp",))
+```
+
+#### Step 3: Integrate TorchTitan's Ring Attention
+```python
+from torch.distributed.tensor.experimental import context_parallel
+
+# In loss computation
+if cp_mesh is not None:
+    with context_parallel(cp_mesh, input_ids):
+        outputs = model(input_ids)  # Ring Attention auto-applied to SDPA
+else:
+    outputs = model(input_ids)
+```
+
+#### Step 4: Update FSDP to use DP submesh
+```python
+# FSDP uses only the DP dimension when CP is enabled
+dp_mesh = mesh["dp"] if "cp" in mesh.mesh_dim_names else mesh
+fully_shard(model, mesh=dp_mesh, mp_policy=mp_policy)
+```
+
+### Configuration Example
+```toml
+# 4x H100 with Context Parallelism
+[parallel_dims]
+dp = 2   # 2 data parallel groups
+cp = 2   # Each sequence split across 2 GPUs within group
+tp = 1
+pp = 1
+# Enables ~2x longer sequences (e.g., 16K instead of 8K)
+```
+
+### GPU Layout Visualization
+```
+4 GPUs with dp=2, cp=2:
+
+CP Group 0: [GPU0 ←→ GPU1]  (tokens 0-4095) ←→ (tokens 4096-8191)
+CP Group 1: [GPU2 ←→ GPU3]  (tokens 0-4095) ←→ (tokens 4096-8191)
+     ↑                ↑
+     └── DP sync ─────┘
+```
+
+### Requirements
+- **PyTorch 2.4+** for stable `context_parallel` APIs
+- **TorchTitan** patterns for Ring Attention implementation
+- Careful testing with PEFT/LoRA (should be compatible)
+
+### Expected Benefits
+| Metric | Without CP | With CP (cp=2) | With CP (cp=4) |
+|--------|-----------|----------------|----------------|
+| Max Seq Length | 8K | 16K | 32K |
+| KV Cache Memory | 100% | 50% | 25% |
+| Communication | None | Ring all-to-all | More all-to-all |
+
+## 4. Data Pipeline
 - **Prefetching JSONL**: Update `DataLoader` to proactively load and tokenize the next batch in a background thread while the current batch is training.
 - **S3/Cloud Loading**: Support streaming data directly from object storage to avoid local disk bottlenecks on multi-node setups.
 
