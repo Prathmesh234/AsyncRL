@@ -11,29 +11,85 @@ Distributed Generator and Distributed Trainer
 
 AsyncRL consists of two primary components operating in a continuous feedback loop:
 
-Distributed Generator (DisGenerator)
+### Distributed Generator (`DisGenerator`)
 
-Disaggregated vLLM Serving: Separates prefill and decode phases across GPUs for maximum throughput
-AsyncBatchOrchestrator: Manages trajectory generation using a dual-queue architecture
-Task Queue: Holds trajectories awaiting model generation
-Tool Queue: Handles asynchronous tool execution (web search, code execution, Azure CLI)
-Streaming Tool Interception: Monitors token streams in real-time, detects tool calls (<web>, <code>, <azure>)
-pauses generation, executes tools asynchronously, and resumes with results
-Multi-worker Concurrency:
-GPU Workers (4-64): Handle fast inference via vLLM proxy
-Tool Workers (32+): Execute I/O-bound tool operations without blocking GPU workers
-On-Policy Data Generation: Automatically reloads the latest policy checkpoint for each batch, ensuring trajectories reflect the current model state
+A scalable, multi-worker trajectory generator that combines **disaggregated vLLM serving** with **asynchronous tool execution** to maximize GPU throughput while supporting tool-using agents.
 
-Distributed Trainer (DisTrainer)
-TorchTitan-Inspired Architecture: Production-grade distributed training with FSDP2 (Fully Sharded Data Parallelism 2)
-Automatic Training Loop: Monitors data/generations/ directory and automatically trains when new batches arrive
-GRPO Loss Computation:
-Groups completions by prompt
-Computes group-relative advantages
-Applies KL regularization against reference policy
-Uses action masks to exclude tool outputs from loss
-Checkpointing: Saves versioned policies as policy-N-{timestamp} using Distributed Checkpoint (DCP)
-HTTP Control Interface: FastAPI endpoints for monitoring and manual control (/train, /status, /checkpoint)
+Core ideas
+
+* **Disaggregated vLLM Serving**
+
+  * Splits **prefill** and **decode** across GPUs to improve end-to-end throughput.
+
+* **`AsyncBatchOrchestrator` (Dual-Queue Architecture)**
+
+  * **Task Queue:** trajectories waiting for model generation
+  * **Tool Queue:** asynchronous tool jobs (web search, code execution, Azure CLI)
+
+Streaming tool interception
+
+* Watches the token stream in real time for tool markers like:
+
+  * `<web> ... </web>`, `<code> ... </code>`, `<azure> ... </azure>`
+* When a tool call is detected:
+
+  1. **Pause** generation
+  2. **Dispatch** tool execution asynchronously
+  3. **Resume** generation with tool results injected back into the context
+
+Concurrency model
+
+* **GPU Workers (4–64):** high-throughput inference via a vLLM proxy (compute-bound)
+* **Tool Workers (32+):** I/O-bound tool execution without blocking GPU workers
+
+On-policy data generation
+
+* For each batch, automatically **reloads the latest policy checkpoint** so generated trajectories reflect the current policy state.
+
+
+### Distributed Trainer (`DisTrainer`)
+
+A production-grade, TorchTitan-inspired trainer for **distributed RL fine-tuning**, built to continuously consume new rollouts and publish versioned policy checkpoints.
+
+Architecture
+
+* **TorchTitan-Inspired Distributed Training**
+
+  * Uses **FSDP2 (Fully Sharded Data Parallelism 2)** for memory-efficient multi-GPU training.
+
+Continuous training loop
+
+* **Automatic Batch Detection**
+
+  * Watches `data/generations/` and automatically starts training when new batches arrive.
+
+GRPO loss pipeline
+
+* **Group-wise Completion Processing**
+
+  * Groups multiple completions by the same prompt
+  * Computes **group-relative advantages**
+* **Stability & Regularization**
+
+  * Applies **KL regularization** against a **reference policy**
+* **Action masking**
+
+  * Uses **action masks** to exclude tool-generated tokens (e.g., tool outputs) from contributing to the loss
+
+Checkpointing
+
+* **Versioned Policy Snapshots**
+
+  * Saves policies as `policy-N-{timestamp}`
+  * Uses **Distributed Checkpoint (DCP)** for scalable, fault-tolerant checkpoint writes
+
+Control plane
+
+* **HTTP Control Interface (FastAPI)**
+
+  * `/train` — manually trigger a training run
+  * `/status` — monitor health / progress
+  * `/checkpoint` — force-save a checkpoint
 
 
 
