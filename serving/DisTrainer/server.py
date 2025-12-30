@@ -190,7 +190,7 @@ def distributed_worker(trainer_instance: Trainer, auto_train: bool = True, poll_
                             "id": f"auto-{uuid.uuid4().hex[:8]}",
                             "auto": True  # Mark as auto-generated
                         }
-                        print(f"📦 New batch detected! Starting auto-training...")
+                        print(f"New batch detected! Starting auto-training...")
         
         # 2. Broadcast the decision (Command or None) to everyone
         object_list = [cmd_data]
@@ -248,7 +248,7 @@ def distributed_worker(trainer_instance: Trainer, auto_train: bool = True, poll_
                         try:
                             if batch_file.exists():
                                 batch_file.unlink()
-                                print(f"🗑️ Deleted processed batch: {batch_file.name}")
+                                print(f" Deleted processed batch: {batch_file.name}")
                         except Exception as e:
                             print(f"⚠️ Failed to delete {batch_file}: {e}")
             

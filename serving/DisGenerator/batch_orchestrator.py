@@ -85,7 +85,7 @@ class AsyncBatchOrchestrator:
         logger.info(f"Tokenizer loaded. Vocab size: {len(self.tokenizer)}")
         
         # Stop strings for vLLM to pause generation immediately on tool call
-        self.stop_tokens = ["</web>", "</code>", "</azure>", "<solution>"]
+        self.stop_tokens = ["</web>", "</code>", "</azure>", "</solution>"]
         
         # Context window configuration
         self.max_model_len = 65536  # Model's max context length (64K)

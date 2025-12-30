@@ -39,7 +39,7 @@ NUM_GPU_WORKERS = int(os.getenv("NUM_GPU_WORKERS", "4"))
 NUM_TOOL_WORKERS = int(os.getenv("NUM_TOOL_WORKERS", "32"))
 
 # Orchestration Hyperparameters
-BATCH_SIZE = 10 # Number of prompts per batch
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "10"))  # Number of prompts per batch file
 NUM_COMPLETIONS = int(os.getenv("NUM_COMPLETIONS", "4")) # Number of completions per prompt (GRPO group size)
 GENERATION_TEMPERATURE = float(os.getenv("GENERATION_TEMPERATURE", "0.9"))
 
