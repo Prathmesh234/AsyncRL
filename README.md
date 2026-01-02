@@ -42,7 +42,7 @@ Streaming tool interception
 
 Concurrency model
 
-* **GPU Workers (4–64):** high-throughput inference via a vLLM proxy (compute-bound)
+* **GPU Workers (4–64):** high-throughput inference via a vLLM proxy (compute-bound). Multiple workers per GPU. 
 * **Tool Workers (32+):** I/O-bound tool execution without blocking GPU workers
 
 On-policy data generation
