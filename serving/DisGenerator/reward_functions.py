@@ -299,38 +299,34 @@ def grader_reward(completion_text: str, prompt: str, timeout_s: int = 30) -> flo
     import random
     
     # ==========================================================================
-    # DUMMY REWARD - Random score to prevent training collapse
-    # Remove this and uncomment the real implementation when grader is ready
+    # REAL IMPLEMENTATION
     # ==========================================================================
-    dummy_score = random.uniform(0.0, 1.0)
-    logger.debug(f"Using DUMMY grader reward: {dummy_score:.3f}")
-    return dummy_score
-    
-    # ==========================================================================
-    # REAL IMPLEMENTATION (commented out - uncomment when grader is available)
-    # ==========================================================================
-    # try:
-    #     # Import grader sender
-    #     from ToolGRPOTrainer.grader_command_sender import send_grader_command
-    #     
-    #     result = send_grader_command(prompt, completion_text, timeout_s=timeout_s)
-    #     
-    #     # Parse score (1-5 from grader)
-    #     raw_score = None
-    #     if result:
-    #         text = str(result).strip()
-    #         match = re.search(r'\d+\.?\d*', text)
-    #         if match:
-    #             raw_score = float(match.group())
-    #     
-    #     # Normalize to 0-1
-    #     if raw_score is not None:
-    #         normalized = (raw_score - 1.0) / 4.0
-    #         return max(0.0, min(1.0, normalized))
-    #     
-    # except ImportError:
-    #     logger.warning("Grader command sender not available")
-    # except Exception as e:
-    #     logger.error(f"Grader error: {e}")
-    # 
-    # return 0.0
+    try:
+        # Import grader sender
+        from ToolGRPOTrainer.grader_command_sender import send_grader_command
+        
+        result = send_grader_command(prompt, completion_text, timeout_s=timeout_s)
+        
+        # Parse score (1-5 from grader)
+        raw_score = None
+        if result:
+            text = str(result).strip()
+            # Look for a number in the output
+            match = re.search(r'\d+\.?\d*', text)
+            if match:
+                raw_score = float(match.group())
+        
+        # Normalize to 0-1
+        if raw_score is not None:
+            # Assuming grader returns 1-5
+            normalized = (raw_score - 1.0) / 4.0
+            return max(0.0, min(1.0, normalized))
+            
+        return 0.0 # Default if no score found
+        
+    except ImportError:
+        logger.warning("Grader command sender not available. Ensuring ToolGRPOTrainer is in path.")
+        return 0.0
+    except Exception as e:
+        logger.error(f"Grader error: {e}")
+        return 0.0

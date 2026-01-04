@@ -435,27 +435,14 @@ class AsyncBatchOrchestrator:
                 result = None
 
                 # Execute Tool (Pseudo-async default to blocking call wrapped in thread if needed)
-                # DUMMY IMPLEMENTATION FOR TESTING
-                # Commenting out actual execution logic
-                # if tool_type == "web":
-                #      result = await loop.run_in_executor(None, send_web_command, {"q": content})
-                # elif tool_type == "code":
-                #      result = await loop.run_in_executor(None, send_code_command, {"code_command": content})
-                # elif tool_type == "azure":
-                #      result = await loop.run_in_executor(None, send_azure_command, {"azure_command": content})
-                # else:
-                #     result = f"[Error] Unknown tool type: {tool_type}"
-
-                # Mock Response
-                await asyncio.sleep(0.5) # Simulate latency
                 if tool_type == "web":
-                    result = f"Mock Web Search Result for: {content}"
+                     result = await loop.run_in_executor(None, send_web_command, {"q": content})
                 elif tool_type == "code":
-                    result = f"Mock Code Execution Result for: {content}\nOutput: Success"
+                     result = await loop.run_in_executor(None, send_code_command, {"code_command": content})
                 elif tool_type == "azure":
-                    result = f"Mock Azure Command Result for: {content}\nStatus: OK"
+                     result = await loop.run_in_executor(None, send_azure_command, {"azure_command": content})
                 else:
-                    result = f"Mock Unknown Tool: {content}"
+                    result = f"[Error] Unknown tool type: {tool_type}"
 
                 # Format Result
                 # Format Result
