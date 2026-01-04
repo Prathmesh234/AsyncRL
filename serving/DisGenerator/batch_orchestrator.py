@@ -458,17 +458,42 @@ class AsyncBatchOrchestrator:
                     result = f"Mock Unknown Tool: {content}"
 
                 # Format Result
-                result_str = f"<tool_result>{result}</tool_result>\n"
+                # Format Result
+                prefix = "<tool_result>"
+                suffix = "</tool_result>\n"
+                result_str = f"{prefix}{result}{suffix}"
                 
                 # Tokenize tool result to get token count for action masking
                 # These tokens should NOT contribute to loss (mask = 0)
-                tool_result_tokens = self.tokenizer(result_str, add_special_tokens=False)["input_ids"]
-                num_tool_tokens = len(tool_result_tokens)
+                full_tokens = self.tokenizer(result_str, add_special_tokens=False)["input_ids"]
+                num_tokens = len(full_tokens)
                 
-                # Append 0s for tool result tokens (skip in loss)
-                # Also append placeholder logprobs (0.0) to keep arrays aligned
-                traj.action_mask.extend([0] * num_tool_tokens)
-                traj.accumulated_logprobs.extend([0.0] * num_tool_tokens)
+                # Calculate lengths of prefix and suffix tokens
+                prefix_ids = self.tokenizer(prefix, add_special_tokens=False)["input_ids"]
+                suffix_ids = self.tokenizer(suffix, add_special_tokens=False)["input_ids"]
+                len_prefix = len(prefix_ids)
+                len_suffix = len(suffix_ids)
+
+                # Prepare mask: 1 = model-generated (learnable), 0 = tool result (masked)
+                # User request: Mask ONLY the tokens between <tool_result> and </tool_result>
+                mask = [0] * num_tokens
+                
+                # Unmask the tags if total length accommodates them
+                if num_tokens >= len_prefix + len_suffix:
+                    # Unmask prefix (<tool_result>)
+                    for i in range(len_prefix):
+                        mask[i] = 1
+                    # Unmask suffix (</tool_result>\n)
+                    for i in range(len_suffix):
+                        mask[num_tokens - len_suffix + i] = 1
+                else:
+                    # Fallback for weird edge cases: unmask everything if shorter than tags equivalent
+                    # This shouldn't happen with valid strings
+                    mask = [1] * num_tokens # or 0? user wants to mask content. 
+
+                # Append mask and placeholder logprobs
+                traj.action_mask.extend(mask)
+                traj.accumulated_logprobs.extend([0.0] * num_tokens)
                 
                 # Update Trajectory
                 traj.messages.append({"role": "tool", "content": result_str})
