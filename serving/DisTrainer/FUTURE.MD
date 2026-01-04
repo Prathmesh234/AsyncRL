@@ -112,3 +112,39 @@ CP Group 1: [GPU2 ←→ GPU3]  (tokens 0-4095) ←→ (tokens 4096-8191)
 - **Prefetching JSONL**: Update `DataLoader` to proactively load and tokenize the next batch in a background thread while the current batch is training.
 - **S3/Cloud Loading**: Support streaming data directly from object storage to avoid local disk bottlenecks on multi-node setups.
 
+
+## 5. Prime Intellect Verifiers Integration
+Integrate Prime Intellect's Verifiers and Environment Hub to enhance model testing and reward generation.
+
+### Overview
+Use 10-15 code-dominant environments from the Prime Intellect Environment Hub to test model outputs and generate reward signals. This will involve a new feedback loop where problems are fetched from these environments, solved by the model, and then verified.
+
+### Implementation Plan
+
+#### 1. Environment Setup
+- Install `verifiers` and `prime-cli` libraries.
+- Configure authentication (`PRIME_API_KEY`) in `.env`.
+
+#### 2. Environment Selection & Discovery
+- Discover and select 10-15 code-domain environments (e.g., `prime/code-contest`, `prime/mbpp`).
+- Create `serving/DisGenerator/verifier_config.json` to manage enabled environments.
+
+#### 3. Integration Logic
+- **Verifier Manager**: creates `serving/DisGenerator/verifiers_bridge.py` with a `PrimeVerifierManager` class to handle:
+    - Loading environments.
+    - Executing solutions against environments using `verify(prompt, solution, env_name)`.
+    - Returning scores/feedback.
+- **Orchestrator Updates**:
+    - Add `VerificationMode` to `batch_orchestrator.py` to fetch prompts from `PrimeVerifierManager` instead of the API queue.
+    - Track environment IDs in `Trajectory` objects.
+
+#### 4. Reward Integration
+- Update `serving/DisGenerator/reward_functions.py` to include `prime_verifier_reward(content, env_id)`.
+- Use verification scores as part of the total reward calculation.
+
+#### 5. Execution Workflow
+- Create `serving/run_prime_eval.py` to drive the evaluation loop:
+    1. Fetch problem from `PrimeVerifierManager`.
+    2. Generate solution via `DisGenerator`.
+    3. Verify solution.
+    4. Log results and rewards.
