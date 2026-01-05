@@ -14,4 +14,4 @@ mkdir -p "${CODE_WORKSPACE_DIR}"
 
 # Start your app
 echo "[startup] Starting app..."
-exec uv run python -m uvicorn src.main:app --host 0.0.0.0 --port 8001
+exec uv run python -m uvicorn src.main:app --host 0.0.0.0 --port 8002

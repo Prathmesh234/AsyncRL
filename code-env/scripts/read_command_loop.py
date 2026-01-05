@@ -6,7 +6,7 @@ import time
 import urllib.request
 from urllib.error import URLError, HTTPError
 
-URL = os.environ.get("READ_COMMAND_URL", "http://localhost:8001/read-command")
+URL = os.environ.get("READ_COMMAND_URL", "http://localhost:8002/read-command")
 INTERVAL = float(os.environ.get("READ_COMMAND_INTERVAL", "2"))
 
 
