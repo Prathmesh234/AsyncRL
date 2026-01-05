@@ -486,7 +486,7 @@ class AsyncBatchOrchestrator:
                 traj.messages.append({"role": "tool", "content": result_str})
                 
                 # Re-queue for GPU Processing (Next Turn)
-                logger.info(f"[Tool-{worker_id}] Finished {tool_type}. Added {num_tool_tokens} masked tokens. Re-queueing Traj {traj.id}")
+                logger.info(f"[Tool-{worker_id}] Finished {tool_type}. Added {num_tokens} masked tokens. Re-queueing Traj {traj.id}")
                 await self.task_queue.put(traj)
                 
             except Exception as e:

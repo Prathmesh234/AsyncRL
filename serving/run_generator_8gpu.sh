@@ -57,6 +57,7 @@ echo "=============================================="
 echo ""
 
 # Run the orchestrator (this blocks until interrupted)
+
 uv run python simple_client.py
 
 # Cleanup on exit
