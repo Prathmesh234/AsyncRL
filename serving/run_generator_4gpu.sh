@@ -55,7 +55,7 @@ echo "=============================================="
 echo ""
 
 # Run the orchestrator (this blocks until interrupted)
-uv run python simple_client.py
+uv run python simple_client.py --tool azure --tool code --tool web
 
 # Cleanup on exit
 echo "Shutting down servers..."
