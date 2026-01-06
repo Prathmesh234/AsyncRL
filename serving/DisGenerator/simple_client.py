@@ -9,6 +9,7 @@ Usage:
     python simple_client.py
 """
 
+import argparse
 import asyncio
 import json
 import os
@@ -16,12 +17,13 @@ import sys
 import logging
 import uuid
 import time
-from typing import List
+from typing import List, Iterable
 
 # Add parent directory to path to locate batch_orchestrator
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from batch_orchestrator import AsyncBatchOrchestrator, Trajectory
+from parser import TOOL_TAGS
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -49,6 +51,30 @@ SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "")
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [Client] %(message)s')
 logger = logging.getLogger("Client")
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="DisGenerator Orchestrator Client")
+    parser.add_argument(
+        "--tool",
+        action="append",
+        default=[],
+        help="Enable tool interception (repeatable or comma-separated): azure, code, web.",
+    )
+    return parser.parse_args()
+
+def normalize_tools(raw_tools: Iterable[str]) -> List[str]:
+    tools: List[str] = []
+    for entry in raw_tools:
+        for tool in entry.split(","):
+            tool = tool.strip().lower()
+            if tool:
+                tools.append(tool)
+    if not tools:
+        return list(TOOL_TAGS)
+    invalid = sorted(set(tools) - set(TOOL_TAGS))
+    if invalid:
+        raise ValueError(f"Unknown tool(s): {', '.join(invalid)}")
+    return sorted(set(tools), key=tools.index)
 
 async def load_prompts(file_path: str, system_prompt: str = "") -> List[Trajectory]:
     """Load prompts from a JSONL file and create Trajectory objects.
@@ -109,6 +135,9 @@ async def monitor_progress(orchestrator: AsyncBatchOrchestrator, total_tasks: in
         await asyncio.sleep(5)
 
 async def main():
+    args = parse_args()
+    enabled_tools = normalize_tools(args.tool)
+
     print(f"\n{'='*60}")
     print("DisGenerator Orchestrator Client")
     print(f"{'='*60}")
@@ -120,6 +149,7 @@ async def main():
     print(f"  System Prompt : {'Yes (' + str(len(SYSTEM_PROMPT)) + ' chars)' if SYSTEM_PROMPT else 'No'}")
     print(f"  GPU Workers   : {NUM_GPU_WORKERS}")
     print(f"  Tool Workers  : {NUM_TOOL_WORKERS}")
+    print(f"  Enabled Tools : {', '.join(enabled_tools)}")
     print(f"  ─────────────────────────────")
     print(f"  GRPO Hyperparameters:")
     print(f"  Batch Size    : {BATCH_SIZE} prompts ({BATCH_SIZE * NUM_COMPLETIONS} trajectories)")
@@ -138,7 +168,8 @@ async def main():
         output_dir=OUTPUT_DIR,
         batch_size=BATCH_SIZE,  # Number of complete GROUPS (prompts) per batch
         num_completions_per_prompt=NUM_COMPLETIONS,
-        generation_temperature=GENERATION_TEMPERATURE
+        generation_temperature=GENERATION_TEMPERATURE,
+        enabled_tools=enabled_tools
     )
 
     # 2. Start Workers

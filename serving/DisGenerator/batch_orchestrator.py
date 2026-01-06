@@ -7,7 +7,7 @@ import os
 import sys
 import uuid
 import aiohttp
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Iterable
 from dataclasses import dataclass, field
 
 # Add parent directory to path to allow imports from serving root
@@ -17,7 +17,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from communication.command_sender import send_web_command
 from communication.code_command_sender import send_code_command
 from communication.azure_command_sender import send_azure_command
-from parser import stream_parser
+from parser import stream_parser, TOOL_TAGS
 
 # Import helper modules
 from utilities import get_next_batch_number, write_batch_file, ensure_output_dir
@@ -51,11 +51,12 @@ class Trajectory:
     group_id: str = ""
 
 class AsyncBatchOrchestrator:
-    def __init__(self, proxy_url: str, model: str = "Qwen/Qwen3-4B-Thinking-2507", tokenizer_name: str = "Qwen/Qwen3-4B-Thinking-2507", num_gpu_workers: int = 4, num_tool_workers: int = 32, output_dir: str = None, batch_size: int = 10, num_completions_per_prompt: int = 4, generation_temperature: float = 1.0):
+    def __init__(self, proxy_url: str, model: str = "Qwen/Qwen3-4B-Thinking-2507", tokenizer_name: str = "Qwen/Qwen3-4B-Thinking-2507", num_gpu_workers: int = 4, num_tool_workers: int = 32, output_dir: str = None, batch_size: int = 10, num_completions_per_prompt: int = 4, generation_temperature: float = 1.0, enabled_tools: Optional[Iterable[str]] = None):
         self.proxy_url = proxy_url
         self.model = model  # Can be base model or LoRA adapter name
         self.task_queue = asyncio.Queue()  # For GPU tasks
         self.tool_queue = asyncio.Queue()  # For Tool execution tasks
+        self.enabled_tools = tuple(enabled_tools) if enabled_tools is not None else TOOL_TAGS
         
         # Output configuration - save as batch files to DisTrainer
         if output_dir is None:
@@ -85,7 +86,8 @@ class AsyncBatchOrchestrator:
         logger.info(f"Tokenizer loaded. Vocab size: {len(self.tokenizer)}")
         
         # Stop strings for vLLM to pause generation immediately on tool call
-        self.stop_tokens = ["</web>", "</code>", "</azure>", "</solution>"]
+        self.tool_stop_tokens = [f"</{tool}>" for tool in self.enabled_tools]
+        self.stop_tokens = [*self.tool_stop_tokens, "</solution>"]
         
         # Context window configuration
         self.max_model_len = 65536  # Model's max context length (64K)
@@ -352,7 +354,7 @@ class AsyncBatchOrchestrator:
                                         
                                         # Check for tool tags in the accumulated buffer
                                         # stream_parser returns dict if complete tag found: {'type': 'web', 'content': '...'}
-                                        tool_call = stream_parser(buffer)
+                                        tool_call = stream_parser(buffer, allowed_tools=self.enabled_tools)
                                         
                                         if tool_call:
                                             logger.info(f"[GPU-{worker_id}] Tool Detected: {tool_call['type']}")
@@ -377,12 +379,12 @@ class AsyncBatchOrchestrator:
                         # vLLM stop_reason contains the actual stop string that triggered the stop
                         if not tool_detected and finish_reason == "stop" and stop_reason:
                             # Append the stop token to buffer if it's a tool tag
-                            if stop_reason in ["</web>", "</code>", "</azure>"]:
+                            if stop_reason in self.tool_stop_tokens:
                                 buffer += stop_reason
                                 logger.debug(f"[GPU-{worker_id}] Appended stop_reason: {stop_reason}")
                                 
                                 # Re-check for tool after appending stop token
-                                tool_call = stream_parser(buffer)
+                                tool_call = stream_parser(buffer, allowed_tools=self.enabled_tools)
                                 if tool_call:
                                     logger.info(f"[GPU-{worker_id}] Tool Detected (via stop_reason): {tool_call['type']}")
                                     
@@ -394,6 +396,10 @@ class AsyncBatchOrchestrator:
                                     
                                     await self.tool_queue.put((traj, tool_call))
                                     tool_detected = True
+                            elif stop_reason == "</solution>":
+                                if stop_reason not in buffer:
+                                    buffer += stop_reason
+                                    logger.debug(f"[GPU-{worker_id}] Appended stop_reason: {stop_reason}")
                     
                     # If stream finished without tool, task is done (or solution found)
                     if not tool_detected:

@@ -5,7 +5,14 @@ Contains parsers for thinking tags, solution tags, and tool calls.
 
 import json
 import re
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional, Iterable
+
+TOOL_TAGS = ("web", "code", "azure")
+TOOL_SCHEMAS = {
+    "web": ["q", "k"],
+    "code": ["code_command"],
+    "azure": ["azure_command"],
+}
 
 
 def _extract_tag(content: str, tag: str) -> List[Tuple[int, str]]:
@@ -27,13 +34,14 @@ def _extract_tag(content: str, tag: str) -> List[Tuple[int, str]]:
     return matches
 
 
-def stream_parser(buffer: str):
+def stream_parser(buffer: str, allowed_tools: Optional[Iterable[str]] = None):
     """
     Detect complete tool tags in a streaming buffer.
     Returns {"type": tool_type, "content": payload} if found, else None.
     """
     earliest = None
-    for tool in ("web", "code", "azure"):
+    tools = tuple(allowed_tools) if allowed_tools is not None else TOOL_TAGS
+    for tool in tools:
         matches = _extract_tag(buffer, tool)
         if matches:
             start, inner = matches[0]
@@ -65,7 +73,7 @@ def parse_thinking_tags(content: str) -> Tuple[str, str, str]:
 def parse_tool_tags(content: str) -> List[Dict[str, Any]]:
     """Return list of tool calls with type and content."""
     tool_calls = []
-    for tool_type in ("web", "code", "azure"):
+    for tool_type in TOOL_TAGS:
         for _, inner in _extract_tag(content, tool_type):
             tool_calls.append({"type": tool_type, "content": inner.strip()})
     return tool_calls
@@ -86,12 +94,7 @@ def validate_tool_schema(tool_type: str, tool_data: Dict[str, Any]) -> bool:
     """Basic schema validation per tool type."""
     if "raw_content" in tool_data and len(tool_data) == 1:
         return False
-    schemas = {
-        "web": ["q", "k"],
-        "code": ["code_command"],
-        "azure": ["azure_command"],
-    }
-    required = schemas.get(tool_type)
+    required = TOOL_SCHEMAS.get(tool_type)
     if required is None:
         return False
     if tool_data.get("type") != tool_type:
