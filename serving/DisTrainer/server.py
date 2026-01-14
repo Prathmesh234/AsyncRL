@@ -143,11 +143,11 @@ async def health():
 
 # --- Core Logic ---
 
-def init_trainer(config_path: str):
+def init_trainer(config_path: str, use_base_model: bool = False):
     """Initialize the global trainer instance."""
     global trainer
     config = Config.from_toml(config_path)
-    trainer = Trainer(config)
+    trainer = Trainer(config, use_base_model=use_base_model)
     return trainer
 
 def distributed_worker(trainer_instance: Trainer, auto_train: bool = True, poll_interval: float = 5.0):
@@ -274,12 +274,12 @@ def distributed_worker(trainer_instance: Trainer, auto_train: bool = True, poll_
             break
 
 
-def run_server(config_path: str, host: str = "0.0.0.0", port: int = 8000):
+def run_server(config_path: str, host: str = "0.0.0.0", port: int = 8000, use_base_model: bool = False):
     """Start the distributed system."""
     import uvicorn
-    
+
     # 1. Initialize Trainer (ALL Ranks)
-    init_trainer(config_path)
+    init_trainer(config_path, use_base_model=use_base_model)
     t = get_trainer()
     
     # 2. Rank 0 starts HTTP Server in Background Thread

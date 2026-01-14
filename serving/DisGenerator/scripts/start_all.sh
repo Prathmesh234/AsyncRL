@@ -13,6 +13,7 @@
 #   ./start_all.sh 2p2d               # 2 Prefill + 2 Decode
 #   ./start_all.sh 1p3d               # 1 Prefill + 3 Decode
 #   ./start_all.sh 3p1d               # 3 Prefill + 1 Decode
+#   ./start_all.sh 1p1d --use-base-model  # Use base model without LoRA adapter
 #
 # Environment Variables:
 #   MODEL             - Model to serve (default: Qwen/Qwen3-4B-Thinking-2507)
@@ -26,8 +27,16 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_DIR"
 
-# Configuration from arguments
+# Parse arguments
 CONFIG="${1:-1p1d}"
+USE_BASE_MODEL=""
+
+# Check for --use-base-model flag in any position
+for arg in "$@"; do
+    if [ "$arg" == "--use-base-model" ]; then
+        USE_BASE_MODEL="--use-base-model"
+    fi
+done
 
 # Parse configuration
 case "$CONFIG" in
@@ -84,6 +93,11 @@ echo "=============================================="
 echo "DisGenerator - Disaggregated Serving Stack"
 echo "=============================================="
 echo "  Model:          $MODEL"
+if [ -n "$USE_BASE_MODEL" ]; then
+    echo "  Mode:           BASE MODEL (no LoRA adapter)"
+else
+    echo "  Mode:           FINETUNED (with LoRA adapter)"
+fi
 echo "  Prefill GPUs:   $PREFILL_GPUS"
 echo "  Decode GPUs:    $DECODE_GPUS"
 echo "  Proxy Port:     $PROXY_PORT"
@@ -205,9 +219,9 @@ for i in "${!P_GPU_ARR[@]}"; do
     gpu_id="${P_GPU_ARR[$i]}"
     http_port="${P_HTTP_ARR[$i]}"
     kv_port="${P_KV_ARR[$i]}"
-    
+
     echo "   Prefill $((i+1)): GPU $gpu_id, HTTP $http_port, KV $kv_port"
-    bash "$SCRIPT_DIR/start_prefill.sh" "$gpu_id" "$http_port" "$kv_port" &
+    bash "$SCRIPT_DIR/start_prefill.sh" "$gpu_id" "$http_port" "$kv_port" $USE_BASE_MODEL &
     PIDS+=($!)
 done
 
@@ -225,9 +239,9 @@ for i in "${!D_GPU_ARR[@]}"; do
     gpu_id="${D_GPU_ARR[$i]}"
     http_port="${D_HTTP_ARR[$i]}"
     kv_port="${D_KV_ARR[$i]}"
-    
+
     echo "   Decode $((i+1)): GPU $gpu_id, HTTP $http_port, KV $kv_port"
-    bash "$SCRIPT_DIR/start_decode.sh" "$gpu_id" "$http_port" "$kv_port" &
+    bash "$SCRIPT_DIR/start_decode.sh" "$gpu_id" "$http_port" "$kv_port" $USE_BASE_MODEL &
     PIDS+=($!)
 done
 
