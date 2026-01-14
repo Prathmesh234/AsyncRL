@@ -12,12 +12,16 @@
 #   ./start_decode.sh              # Use defaults: GPU 1, port 20002, kv 22001
 #   ./start_decode.sh 1 20002 22001
 #   ./start_decode.sh 2 20004 22002
-#   ./start_decode.sh 1 20002 22001 --use-base-model  # Use base model without LoRA
+#   ./start_decode.sh 1 20002 22001 --use-base-model  # Use base SFT adapter (checkpoint-2280)
+#
+# Adapter Modes:
+#   Default (no flag):     Uses policy-0-initial or latest DisTrainer policy
+#   --use-base-model:      Uses checkpoint-2280-openthoughts (SFT from Finetuning.ipynb)
 #
 # Environment Variables:
 #   MODEL             - Model to serve (default: Qwen/Qwen3-4B-Thinking-2507)
 #   PROXY_PORT        - Proxy ZMQ port (default: 30001)
-#   MAX_MODEL_LEN     - Max sequence length (default: 8192)
+#   MAX_MODEL_LEN     - Max sequence length (default: 65536)
 #   DTYPE             - Data type (default: float16)
 # =============================================================================
 
@@ -38,26 +42,32 @@ HTTP_PORT="${2:-20002}"
 KV_PORT="${3:-22001}"
 USE_BASE_MODEL="${4:-}"
 
-# Configuration from environment with defaults (matches DisTrainer)
+# Configuration from environment with defaults
 MODEL="${MODEL:-Qwen/Qwen3-4B-Thinking-2507}"
 PROXY_PORT="${PROXY_PORT:-30001}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-65536}"
 DTYPE="${DTYPE:-float16}"
 # Lower GPU memory utilization to leave room for incoming KV cache
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.7}"
-LORA_MODULE_NAME="${LORA_MODULE_NAME:-grpo-adapter}"
-# Default LoRA path relative to serving directory (can be overridden via env var)
-# Default LoRA path relative to serving directory (can be overridden via env var)
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DISTRAINER_ADAPTER="$(cd "$SCRIPT_DIR/../../DisTrainer/models/latest_adapter" 2>/dev/null && pwd || echo '')"
-LEGACY_ADAPTER="$(cd "$SCRIPT_DIR/../../ToolGRPOTrainer/grpo-streamed/checkpoint-10" 2>/dev/null && pwd || echo '')"
 
-if [ -n "$DISTRAINER_ADAPTER" ]; then
-    DEFAULT_LORA_PATH="$DISTRAINER_ADAPTER"
+# Models directory (relative to DisGenerator)
+MODELS_DIR="$SCRIPT_DIR/../../DisTrainer/models"
+
+# Select adapter based on flag
+if [ "$USE_BASE_MODEL" == "--use-base-model" ]; then
+    # Use the SFT adapter from Finetuning.ipynb
+    LORA_MODULE_NAME="openthoughts-adapter"
+    LORA_MODULE_PATH="$(cd "$MODELS_DIR/checkpoint-2280-openthoughts" 2>/dev/null && pwd)"
 else
-    DEFAULT_LORA_PATH="$LEGACY_ADAPTER"
+    # Use ToolGRPO adapter (policy-0-initial) or latest trainer policy
+    LORA_MODULE_NAME="grpo-adapter"
+    # Check for latest_adapter symlink first, fallback to policy-0-initial
+    if [ -d "$MODELS_DIR/latest_adapter" ]; then
+        LORA_MODULE_PATH="$(cd "$MODELS_DIR/latest_adapter" && pwd)"
+    else
+        LORA_MODULE_PATH="$(cd "$MODELS_DIR/policy-0-initial" 2>/dev/null && pwd)"
+    fi
 fi
-LORA_MODULE_PATH="${LORA_MODULE_PATH:-$DEFAULT_LORA_PATH}"
 
 # Server identification
 SERVER_ID="decode_gpu${GPU_ID}_port${HTTP_PORT}"
@@ -71,11 +81,11 @@ echo "  HTTP Port:  $HTTP_PORT"
 echo "  KV Port:    $KV_PORT"
 echo "  Model:      $MODEL"
 if [ "$USE_BASE_MODEL" == "--use-base-model" ]; then
-    echo "  Mode:       BASE MODEL (no LoRA)"
+    echo "  Mode:       BASE MODEL (SFT checkpoint-2280)"
 else
-    echo "  Mode:       FINETUNED (with LoRA)"
-    echo "  LoRA:       $LORA_MODULE_PATH"
+    echo "  Mode:       GRPO FINETUNED"
 fi
+echo "  LoRA:       $LORA_MODULE_PATH"
 echo "  Proxy:      0.0.0.0:$PROXY_PORT"
 echo "  Log file:   $LOG_FILE"
 echo "=============================================="
@@ -104,8 +114,8 @@ KV_CONFIG_INLINE=$(echo "$KV_CONFIG" | tr -d '\n' | tr -s ' ')
 # Start the server
 echo "Launching vLLM server..."
 
-# Build the vLLM command
-VLLM_CMD="CUDA_VISIBLE_DEVICES=$GPU_ID uv run vllm serve $MODEL \
+# Build and execute the vLLM command
+CUDA_VISIBLE_DEVICES=$GPU_ID uv run vllm serve $MODEL \
     --enforce-eager \
     --host 0.0.0.0 \
     --port $HTTP_PORT \
@@ -117,12 +127,7 @@ VLLM_CMD="CUDA_VISIBLE_DEVICES=$GPU_ID uv run vllm serve $MODEL \
     --max-num-seqs 128 \
     --trust-remote-code \
     --gpu-memory-utilization $GPU_MEMORY_UTILIZATION \
-    --kv-transfer-config '$KV_CONFIG_INLINE'"
-
-# Add LoRA flags only if NOT using base model
-if [ "$USE_BASE_MODEL" != "--use-base-model" ]; then
-    VLLM_CMD="$VLLM_CMD --enable-lora --lora-modules '$LORA_MODULE_NAME=$LORA_MODULE_PATH'"
-fi
-
-# Execute the command
-eval "$VLLM_CMD" 2>&1 | tee "$LOG_FILE"
+    --kv-transfer-config "$KV_CONFIG_INLINE" \
+    --enable-lora \
+    --lora-modules "$LORA_MODULE_NAME=$LORA_MODULE_PATH" \
+    2>&1 | tee "$LOG_FILE"

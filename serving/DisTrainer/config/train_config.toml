@@ -5,7 +5,7 @@
 # The base model is Qwen3-4B-Thinking (or locally downloaded version)
 [model]
 name = "Qwen/Qwen3-4B-Thinking-2507"
-# Initial adapter from ToolGRPOTrainer checkpoint-10 (now in DisTrainer/models)
+# Initial adapter from ToolGRPOTrainer checkpoint-10
 adapter_path = "./models/policy-0-initial"
 use_lora = true
 lora_r = 8
@@ -41,4 +41,3 @@ max_sequence_length = 8192
 save_dir = "./models"
 save_interval = 1  # Save checkpoint after every batch (1 batch = 1 policy)
 keep_latest_k = 3
-
