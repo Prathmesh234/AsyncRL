@@ -32,14 +32,20 @@ def main():
         default=8000,
         help="Port to run the server on"
     )
-    
+    parser.add_argument(
+        "--use-base-model",
+        action="store_true",
+        help="Use base model without LoRA adapter (creates fresh LoRA instead)"
+    )
+
     args = parser.parse_args()
-    
+
     # Run the server (handles distributed init internally)
     run_server(
         config_path=args.config,
         host=args.host,
-        port=args.port
+        port=args.port,
+        use_base_model=args.use_base_model
     )
 
 

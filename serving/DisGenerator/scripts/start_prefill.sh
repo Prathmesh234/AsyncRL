@@ -6,12 +6,13 @@
 # Prefill servers process prompts and send KV cache to decode servers via NCCL.
 #
 # Usage:
-#   ./start_prefill.sh [GPU_ID] [HTTP_PORT] [KV_PORT]
+#   ./start_prefill.sh [GPU_ID] [HTTP_PORT] [KV_PORT] [--use-base-model]
 #
 # Examples:
 #   ./start_prefill.sh              # Use defaults: GPU 0, port 20001, kv 21001
 #   ./start_prefill.sh 0 20001 21001
 #   ./start_prefill.sh 1 20003 21002
+#   ./start_prefill.sh 0 20001 21001 --use-base-model  # Use base model without LoRA
 #
 # Environment Variables:
 #   MODEL             - Model to serve (default: Qwen/Qwen3-4B-Thinking-2507)
@@ -35,6 +36,7 @@ mkdir -p logs
 GPU_ID="${1:-0}"
 HTTP_PORT="${2:-20001}"
 KV_PORT="${3:-21001}"
+USE_BASE_MODEL="${4:-}"
 
 # Configuration from environment with defaults (matches DisTrainer)
 MODEL="${MODEL:-Qwen/Qwen3-4B-Thinking-2507}"
@@ -67,6 +69,12 @@ echo "  GPU:        $GPU_ID"
 echo "  HTTP Port:  $HTTP_PORT"
 echo "  KV Port:    $KV_PORT"
 echo "  Model:      $MODEL"
+if [ "$USE_BASE_MODEL" == "--use-base-model" ]; then
+    echo "  Mode:       BASE MODEL (no LoRA)"
+else
+    echo "  Mode:       FINETUNED (with LoRA)"
+    echo "  LoRA:       $LORA_MODULE_PATH"
+fi
 echo "  Proxy:      0.0.0.0:$PROXY_PORT"
 echo "  Log file:   $LOG_FILE"
 echo "=============================================="
@@ -94,7 +102,9 @@ KV_CONFIG_INLINE=$(echo "$KV_CONFIG" | tr -d '\n' | tr -s ' ')
 
 # Start the server
 echo "Launching vLLM server..."
-CUDA_VISIBLE_DEVICES=$GPU_ID uv run vllm serve $MODEL \
+
+# Build the vLLM command
+VLLM_CMD="CUDA_VISIBLE_DEVICES=$GPU_ID uv run vllm serve $MODEL \
     --enforce-eager \
     --host 0.0.0.0 \
     --port $HTTP_PORT \
@@ -106,7 +116,12 @@ CUDA_VISIBLE_DEVICES=$GPU_ID uv run vllm serve $MODEL \
     --max-num-seqs 128 \
     --trust-remote-code \
     --gpu-memory-utilization $GPU_MEMORY_UTILIZATION \
-    --kv-transfer-config "$KV_CONFIG_INLINE" \
-    --enable-lora \
-    --lora-modules "$LORA_MODULE_NAME=$LORA_MODULE_PATH" \
-    2>&1 | tee "$LOG_FILE"
+    --kv-transfer-config '$KV_CONFIG_INLINE'"
+
+# Add LoRA flags only if NOT using base model
+if [ "$USE_BASE_MODEL" != "--use-base-model" ]; then
+    VLLM_CMD="$VLLM_CMD --enable-lora --lora-modules '$LORA_MODULE_NAME=$LORA_MODULE_PATH'"
+fi
+
+# Execute the command
+eval "$VLLM_CMD" 2>&1 | tee "$LOG_FILE"

@@ -80,15 +80,17 @@ class Trainer:
     Main training orchestrator for DisTrainer.
     Handles FSDP2 setup, training loop, and checkpointing.
     """
-    
-    def __init__(self, config: Config):
+
+    def __init__(self, config: Config, use_base_model: bool = False):
         """
         Initialize the Trainer.
-        
+
         Args:
             config: Training configuration
+            use_base_model: If True, use base model without LoRA adapter (creates fresh LoRA)
         """
         self.config = config
+        self.use_base_model = use_base_model
         
         # Initialize distributed
         self.local_rank = init_distributed()
@@ -129,6 +131,10 @@ class Trainer:
         if is_main_rank():
             print(f"Trainer initialized on {config.parallel_dims.dp} GPUs")
             print(f"Model: {config.model.name}")
+            if self.use_base_model:
+                print(f"Mode: BASE MODEL (no finetuned adapter)")
+            else:
+                print(f"Mode: FINETUNED (with LoRA adapter)")
             print(f"Starting from step: {self.step}")
             self.metrics_logger.start()
     
@@ -153,17 +159,23 @@ class Trainer:
         # Apply LoRA if configured
         if self.config.model.use_lora:
             from peft import get_peft_model, LoraConfig, PeftModel
-            
-            if self.config.model.adapter_path:
+
+            # If use_base_model is True, skip loading adapter and create fresh LoRA
+            if self.config.model.adapter_path and not self.use_base_model:
                 if is_main_rank():
                     print(f"Loading LoRA adapter from: {self.config.model.adapter_path}")
                 # Load existing adapter and ensure it's trainable
                 model = PeftModel.from_pretrained(
-                    model, 
+                    model,
                     self.config.model.adapter_path,
                     is_trainable=True
                 )
             else:
+                if is_main_rank():
+                    if self.use_base_model:
+                        print("Using BASE MODEL with fresh LoRA (--use-base-model flag)")
+                    else:
+                        print("No adapter path configured, creating fresh LoRA")
                 lora_config = LoraConfig(
                     r=self.config.model.lora_r,
                     lora_alpha=self.config.model.lora_alpha,
@@ -173,7 +185,7 @@ class Trainer:
                     task_type="CAUSAL_LM"
                 )
                 model = get_peft_model(model, lora_config)
-            
+
             if is_main_rank():
                 print("LoRA applied to model")
                 model.print_trainable_parameters()
