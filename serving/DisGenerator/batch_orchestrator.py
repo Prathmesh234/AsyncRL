@@ -49,6 +49,8 @@ class Trajectory:
     created_at: float = field(default_factory=time.time)
     # GRPO: Group ID for grouping multiple completions per prompt
     group_id: str = ""
+    # Expected answer for verification (used by solution_verifier)
+    expected_answer: str = ""
 
 class AsyncBatchOrchestrator:
     def __init__(self, proxy_url: str, model: str = "Qwen/Qwen3-4B-Thinking-2507", tokenizer_name: str = "Qwen/Qwen3-4B-Thinking-2507", num_gpu_workers: int = 4, num_tool_workers: int = 32, output_dir: str = None, batch_size: int = 10, num_completions_per_prompt: int = 4, generation_temperature: float = 1.0, enabled_tools: Optional[Iterable[str]] = None):
@@ -132,7 +134,8 @@ class AsyncBatchOrchestrator:
                 accumulated_logprobs=[],
                 action_mask=[],
                 status="QUEUED",
-                group_id=group_id
+                group_id=group_id,
+                expected_answer=traj.expected_answer  # Propagate for verification
             )
             await self.task_queue.put(clone)
         
@@ -155,12 +158,14 @@ class AsyncBatchOrchestrator:
         prompt_text = messages_to_prompt_string(prompt_messages, self.tokenizer)
         
         # Compute reward (async-safe as it's CPU-bound, run in thread pool)
+        # Pass expected_answer for solution verification
         loop = asyncio.get_running_loop()
         reward = await loop.run_in_executor(
             None, 
             compute_reward, 
             completion_text, 
-            prompt_text
+            prompt_text,
+            traj.expected_answer  # For Prime Intellect solution verifier
         )
         
         logger.info(f"[Traj {traj.id}] Computed reward: {reward:.3f}")

@@ -80,6 +80,7 @@ async def load_prompts(file_path: str, system_prompt: str = "") -> List[Trajecto
     """Load prompts from a JSONL file and create Trajectory objects.
     
     If system_prompt is provided, it will be prepended as a system message.
+    Reads expected_answer if present for solution verification.
     """
     trajectories = []
     try:
@@ -90,6 +91,7 @@ async def load_prompts(file_path: str, system_prompt: str = "") -> List[Trajecto
                 data = json.loads(line)
                 prompt_id = data.get("prompt_id", str(uuid.uuid4()))
                 messages = data.get("messages", [])
+                expected_answer = data.get("expected_answer", "")
                 
                 # Basic validation
                 if not messages:
@@ -106,7 +108,8 @@ async def load_prompts(file_path: str, system_prompt: str = "") -> List[Trajecto
                     id=prompt_id,
                     messages=messages,
                     completions=[],
-                    status="QUEUED"
+                    status="QUEUED",
+                    expected_answer=expected_answer
                 )
                 trajectories.append(traj)
     except FileNotFoundError:

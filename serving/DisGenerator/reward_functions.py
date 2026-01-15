@@ -252,7 +252,7 @@ def format_reward(content: str) -> float:
     return r
 
 
-def compute_reward(completion_text: str, prompt: str = None) -> float:
+def compute_reward(completion_text: str, prompt: str = None, expected_answer: str = None) -> float:
     """
     Compute the total reward for a completion.
     
@@ -260,11 +260,12 @@ def compute_reward(completion_text: str, prompt: str = None) -> float:
     - tool_reward: Tool tag usage and patterns
     - char_reward: DAPO Soft Overlong Punishment (length-based reward/penalty)
     - format_reward: Proper formatting
-    - grader_reward: External grader service (or dummy random for testing)
+    - verification_reward: Prime Intellect solution verifier (replaces grader)
     
     Args:
         completion_text: The full completion text
-        prompt: The original prompt (used for grader)
+        prompt: The original prompt
+        expected_answer: Ground truth answer for verification (optional)
         
     Returns:
         Total reward as a float
@@ -276,57 +277,77 @@ def compute_reward(completion_text: str, prompt: str = None) -> float:
     total += char_reward(completion_text)  # Includes DAPO length penalty
     total += format_reward(completion_text)
     
-    # ALWAYS include grader reward (uses dummy random when grader unavailable)
-    # This provides necessary reward variance for GRPO training to not collapse
+    # Use solution verifier instead of grader
     try:
-        grader_score = grader_reward(completion_text, prompt or "")
-        total += grader_score
+        verification_score = verification_reward(completion_text, expected_answer)
+        total += verification_score
     except Exception as e:
-        logger.warning(f"Grader reward failed: {e}")
+        logger.warning(f"Verification reward failed: {e}")
     
     logger.debug(f"Computed reward: {total:.3f}")
     return total
 
 
-def grader_reward(completion_text: str, prompt: str, timeout_s: int = 30) -> float:
+def verification_reward(completion_text: str, expected_answer: str = None) -> float:
     """
-    Call external grader service for reward.
-    Returns normalized score (0.0 to 1.0).
+    Verify solution using Prime Intellect's verifiers.
     
-    NOTE: Currently using DUMMY random reward to prevent training collapse.
-    Uncomment the actual implementation when the grader service is ready.
+    Extracts <solution> tag and verifies against expected answer
+    using MathRubric for symbolic equivalence checking.
+    
+    Args:
+        completion_text: Full completion text with <solution> tag
+        expected_answer: Ground truth answer
+        
+    Returns:
+        1.0 if correct, 0.0 if incorrect or no answer provided
     """
-    import random
+    if not expected_answer:
+        logger.debug("No expected_answer provided, skipping verification")
+        return 0.0
     
-    # ==========================================================================
-    # REAL IMPLEMENTATION
-    # ==========================================================================
     try:
-        # Import grader sender
-        from ToolGRPOTrainer.grader_command_sender import send_grader_command
-        
-        result = send_grader_command(prompt, completion_text, timeout_s=timeout_s)
-        
-        # Parse score (1-5 from grader)
-        raw_score = None
-        if result:
-            text = str(result).strip()
-            # Look for a number in the output
-            match = re.search(r'\d+\.?\d*', text)
-            if match:
-                raw_score = float(match.group())
-        
-        # Normalize to 0-1
-        if raw_score is not None:
-            # Assuming grader returns 1-5
-            normalized = (raw_score - 1.0) / 4.0
-            return max(0.0, min(1.0, normalized))
-            
-        return 0.0 # Default if no score found
-        
+        from solution_verifier import compute_verification_reward
+        reward = compute_verification_reward(completion_text, expected_answer)
+        logger.info(f"Verification reward: {reward}")
+        return reward
     except ImportError:
-        logger.warning("Grader command sender not available. Ensuring ToolGRPOTrainer is in path.")
+        logger.warning("solution_verifier not available")
         return 0.0
     except Exception as e:
-        logger.error(f"Grader error: {e}")
+        logger.error(f"Verification error: {e}")
         return 0.0
+
+
+# ==========================================================================
+# ORIGINAL GRADER (COMMENTED OUT - Using solution_verifier instead)
+# ==========================================================================
+# def grader_reward(completion_text: str, prompt: str, timeout_s: int = 30) -> float:
+#     """
+#     Call external grader service for reward.
+#     Returns normalized score (0.0 to 1.0).
+#     """
+#     try:
+#         from ToolGRPOTrainer.grader_command_sender import send_grader_command
+#         
+#         result = send_grader_command(prompt, completion_text, timeout_s=timeout_s)
+#         
+#         raw_score = None
+#         if result:
+#             text = str(result).strip()
+#             match = re.search(r'\d+\.?\d*', text)
+#             if match:
+#                 raw_score = float(match.group())
+#         
+#         if raw_score is not None:
+#             normalized = (raw_score - 1.0) / 4.0
+#             return max(0.0, min(1.0, normalized))
+#             
+#         return 0.0
+#         
+#     except ImportError:
+#         logger.warning("Grader command sender not available.")
+#         return 0.0
+#     except Exception as e:
+#         logger.error(f"Grader error: {e}")
+#         return 0.0
