@@ -23,6 +23,8 @@ from typing import List, Iterable
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from batch_orchestrator import AsyncBatchOrchestrator, Trajectory
+from policy_manager import PolicyManager
+from config import DISTRAINER_MODELS_DIR
 from parser import TOOL_TAGS
 from dotenv import load_dotenv
 
@@ -44,6 +46,10 @@ NUM_TOOL_WORKERS = int(os.getenv("NUM_TOOL_WORKERS", "32"))
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "10"))  # Number of prompts per batch file
 NUM_COMPLETIONS = int(os.getenv("NUM_COMPLETIONS", "4")) # Number of completions per prompt (GRPO group size)
 GENERATION_TEMPERATURE = float(os.getenv("GENERATION_TEMPERATURE", "0.9"))
+
+# Hot-swap LoRA Policy Configuration
+ENABLE_HOTSWAP = os.getenv("ENABLE_HOTSWAP", "true").lower() in ("true", "1", "yes")
+POLICY_POLL_INTERVAL = float(os.getenv("POLICY_POLL_INTERVAL", "5.0"))  # Seconds between policy checks
 
 # System prompt from .env (matches ToolGRPOTrainer)
 SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "")
@@ -158,9 +164,29 @@ async def main():
     print(f"  Batch Size    : {BATCH_SIZE} prompts ({BATCH_SIZE * NUM_COMPLETIONS} trajectories)")
     print(f"  Completions   : {NUM_COMPLETIONS} per prompt")
     print(f"  Temperature   : {GENERATION_TEMPERATURE}")
+    print(f"  ─────────────────────────────")
+    print(f"  Hot-Swap LoRA:")
+    print(f"  Enabled       : {ENABLE_HOTSWAP}")
+    if ENABLE_HOTSWAP:
+        print(f"  Poll Interval : {POLICY_POLL_INTERVAL}s")
+        print(f"  Models Dir    : {DISTRAINER_MODELS_DIR}")
     print(f"{'='*60}\n")
 
-    # 1. Initialize Orchestrator
+    # 1. Initialize PolicyManager for hot-swapping LoRA adapters
+    policy_manager = None
+    if ENABLE_HOTSWAP:
+        logger.info("Initializing PolicyManager for hot-swap LoRA support...")
+        policy_manager = PolicyManager(
+            models_dir=DISTRAINER_MODELS_DIR,
+            lora_name="grpo-adapter",
+            poll_interval=POLICY_POLL_INTERVAL,
+            enable_hotswap=True
+        )
+        policy_manager.start_watching()
+        initial_policy = policy_manager.get_current_policy_info()
+        logger.info(f"Initial policy: {initial_policy}")
+
+    # 2. Initialize Orchestrator
     # batch_size in orchestrator is number of TRAJECTORIES (prompts * completions)
     orchestrator = AsyncBatchOrchestrator(
         proxy_url=PROXY_URL,
@@ -172,10 +198,11 @@ async def main():
         batch_size=BATCH_SIZE,  # Number of complete GROUPS (prompts) per batch
         num_completions_per_prompt=NUM_COMPLETIONS,
         generation_temperature=GENERATION_TEMPERATURE,
-        enabled_tools=enabled_tools
+        enabled_tools=enabled_tools,
+        policy_manager=policy_manager  # Enable hot-swap
     )
 
-    # 2. Start Workers
+    # 3. Start Workers
     await orchestrator.start()
 
     # 3. Load Prompts (with system prompt from .env)
@@ -199,6 +226,10 @@ async def main():
         # Flush any remaining trajectories to disk
         await orchestrator.flush_pending()
         await orchestrator.stop()
+
+        # Stop policy watcher
+        if policy_manager is not None:
+            policy_manager.stop_watching()
 
 if __name__ == "__main__":
     try:
