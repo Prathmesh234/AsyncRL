@@ -210,11 +210,32 @@ class CheckpointManager:
         try:
             if symlink_path.is_symlink() or symlink_path.exists():
                 symlink_path.unlink()
-            
+
             # Create symlink to the latest directory name
             # Using relative path (target.name) makes the symlink portable
             symlink_path.symlink_to(latest_path.name, target_is_directory=True)
+
+            # Create .policy_ready signal file to notify DisGenerator
+            # This enables hot-swap of LoRA policies without restarting vLLM
+            self._create_policy_ready_signal()
         except Exception as e:
             # Don't fail training if symlink fails
             import logging
             logging.getLogger(__name__).warning(f"Failed to update 'latest_adapter' symlink: {e}")
+
+    def _create_policy_ready_signal(self):
+        """
+        Create a .policy_ready signal file to notify DisGenerator.
+
+        DisGenerator's PolicyManager watches for this file and triggers
+        a hot-swap of the LoRA adapter when detected.
+        """
+        signal_file = self.checkpoint_dir / ".policy_ready"
+        try:
+            # Write timestamp to signal file
+            signal_file.write_text(f"{datetime.now().isoformat()}\n")
+            import logging
+            logging.getLogger(__name__).info("📢 Created .policy_ready signal for DisGenerator")
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to create .policy_ready signal: {e}")

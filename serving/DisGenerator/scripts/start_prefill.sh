@@ -129,4 +129,6 @@ CUDA_VISIBLE_DEVICES=$GPU_ID uv run vllm serve $MODEL \
     --kv-transfer-config "$KV_CONFIG_INLINE" \
     --enable-lora \
     --lora-modules "$LORA_MODULE_NAME=$LORA_MODULE_PATH" \
+    --max-loras 3 \
+    --max-cpu-loras 5 \
     2>&1 | tee "$LOG_FILE"

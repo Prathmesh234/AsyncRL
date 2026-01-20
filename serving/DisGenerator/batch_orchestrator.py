@@ -29,6 +29,9 @@ from data_processing import (
 )
 from reward_functions import compute_reward
 
+# PolicyManager for hot-swapping LoRA adapters
+from policy_manager import PolicyManager
+
 # Tokenizer for proper token ID extraction
 from transformers import AutoTokenizer
 
@@ -53,12 +56,15 @@ class Trajectory:
     expected_answer: str = ""
 
 class AsyncBatchOrchestrator:
-    def __init__(self, proxy_url: str, model: str = "Qwen/Qwen3-4B-Thinking-2507", tokenizer_name: str = "Qwen/Qwen3-4B-Thinking-2507", num_gpu_workers: int = 4, num_tool_workers: int = 32, output_dir: str = None, batch_size: int = 10, num_completions_per_prompt: int = 4, generation_temperature: float = 1.0, enabled_tools: Optional[Iterable[str]] = None):
+    def __init__(self, proxy_url: str, model: str = "Qwen/Qwen3-4B-Thinking-2507", tokenizer_name: str = "Qwen/Qwen3-4B-Thinking-2507", num_gpu_workers: int = 4, num_tool_workers: int = 32, output_dir: str = None, batch_size: int = 10, num_completions_per_prompt: int = 4, generation_temperature: float = 1.0, enabled_tools: Optional[Iterable[str]] = None, policy_manager: Optional[PolicyManager] = None):
         self.proxy_url = proxy_url
         self.model = model  # Can be base model or LoRA adapter name
         self.task_queue = asyncio.Queue()  # For GPU tasks
         self.tool_queue = asyncio.Queue()  # For Tool execution tasks
         self.enabled_tools = tuple(enabled_tools) if enabled_tools is not None else TOOL_TAGS
+
+        # PolicyManager for hot-swapping LoRA adapters (optional)
+        self.policy_manager = policy_manager
         
         # Output configuration - save as batch files to DisTrainer
         if output_dir is None:
@@ -294,7 +300,7 @@ class AsyncBatchOrchestrator:
                     max_tokens = max(self.min_completion_tokens, min(available_tokens, 16000))
                     
                     logger.debug(f"[GPU-{worker_id}] Input: {input_tokens} tokens, max_tokens: {max_tokens}")
-                    
+
                     # Prepare request payload
                     payload = {
                         "model": self.model,  # Use configured model (base or LoRA adapter name)
@@ -305,6 +311,18 @@ class AsyncBatchOrchestrator:
                         "logprobs": 1, # Request logprobs
                         "stop": self.stop_tokens
                     }
+
+                    # Add LoRA request if PolicyManager is configured (hot-swap support)
+                    if self.policy_manager is not None:
+                        lora_request = self.policy_manager.get_current_lora_request()
+                        if lora_request is not None:
+                            # vLLM uses extra_body for LoRA requests
+                            payload["extra_body"] = {
+                                "lora_request": lora_request.to_dict()
+                            }
+                            logger.debug(
+                                f"[GPU-{worker_id}] Using LoRA: lora_int_id={lora_request.lora_int_id}"
+                            )
 
                     buffer = ""
                     # Reset logprob accumulator for this turn (NOT completions - those accumulate)
