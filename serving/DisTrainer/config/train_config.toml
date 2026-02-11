@@ -12,6 +12,14 @@ lora_r = 8
 lora_alpha = 16
 target_modules = ["q_proj", "v_proj", "k_proj", "o_proj"]
 
+# Model architecture type: "dense" for standard transformers, "moe" for Mixture-of-Experts
+model_type = "dense"
+
+# MoE-specific settings (only used when model_type = "moe")
+# freeze_experts: If true, freeze expert/MLP layers during training
+#                 Required when vLLM/sglang don't support LoRA on expert layers
+freeze_experts = true
+
 # Training Hyperparameters
 [training]
 learning_rate = 5e-6
