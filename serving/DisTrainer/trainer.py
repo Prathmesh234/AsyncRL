@@ -12,7 +12,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from torch.distributed.checkpoint.state_dict import get_state_dict, StateDictOptions
 
 from .mesh import ParallelDims, build_mesh, init_distributed, is_main_rank
-from .models.qwen3 import apply_fsdp
+from .models.parallelization import get_fsdp_strategy, print_trainable_parameters
 from .components import CheckpointManager, DataLoader, compute_grpo_loss, MetricsLogger
 from .components.metrics import TrainingMetrics
 
@@ -25,7 +25,9 @@ class ModelConfig:
     lora_alpha: int = 16
     target_modules: list = None
     adapter_path: Optional[str] = None
-    
+    model_type: str = "dense"  # "dense" or "moe"
+    freeze_experts: bool = True  # For MoE: freeze expert/MLP layers
+
     def __post_init__(self):
         if self.target_modules is None:
             self.target_modules = ["q_proj", "v_proj", "k_proj", "o_proj"]
@@ -100,9 +102,17 @@ class Trainer:
         
         # Load model and tokenizer
         self.model, self.tokenizer = self._build_model()
-        
-        # Apply FSDP2
-        self.model = apply_fsdp(self.model, self.mesh)
+
+        # Apply FSDP2 (strategy depends on model_type)
+        fsdp_strategy = get_fsdp_strategy(config.model.model_type)
+        if config.model.model_type == "moe":
+            self.model = fsdp_strategy(
+                self.model,
+                self.mesh,
+                freeze_experts=config.model.freeze_experts
+            )
+        else:
+            self.model = fsdp_strategy(self.model, self.mesh)
         
         # Setup optimizer
         self.optimizer = torch.optim.AdamW(
@@ -189,6 +199,15 @@ class Trainer:
             if is_main_rank():
                 print("LoRA applied to model")
                 model.print_trainable_parameters()
+                # Additional statistics after potential expert freezing
+                if self.config.model.model_type == "moe":
+                    print(f"\nMoE Configuration:")
+                    print(f"  - Model Type: MoE (Mixture-of-Experts)")
+                    print(f"  - Freeze Experts: {self.config.model.freeze_experts}")
+                    if self.config.model.freeze_experts:
+                        print(f"  - Training: Attention layers only (experts frozen)")
+                    else:
+                        print(f"  - Training: All layers including experts")
         
         # Convert to bfloat16 for memory efficiency
         model = model.to(torch.bfloat16)

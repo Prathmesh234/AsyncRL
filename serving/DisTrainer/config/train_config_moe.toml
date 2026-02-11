@@ -1,0 +1,60 @@
+# DisTrainer Configuration for MoE Models
+# Example: Arcee Trinity Mini (26B total, 3B active)
+
+# Model Configuration
+[model]
+name = "arcee-ai/Arcee-Trinity-Mini"
+# Initial adapter (create this first or set to null for fresh LoRA)
+adapter_path = "./models/policy-0-initial"
+use_lora = true
+lora_r = 8
+lora_alpha = 16
+
+# For MoE models: Target ONLY attention layers, not MLP/expert layers
+# Common attention projection layers across most architectures:
+target_modules = ["q_proj", "v_proj", "k_proj", "o_proj"]
+
+# Model architecture type: "moe" for Mixture-of-Experts models
+model_type = "moe"
+
+# MoE-specific: Freeze expert/MLP layers during training
+# IMPORTANT: Set this to true until vLLM/sglang support LoRA on expert layers
+# When set to true, only attention layers will be trained
+freeze_experts = true
+
+# Training Hyperparameters
+# For MoE models, you may want to adjust learning rate due to smaller trainable params
+[training]
+learning_rate = 5e-6  # Consider increasing if only training attention layers
+beta = 0.01  # KL penalty coefficient
+max_grad_norm = 1.0
+num_generations_per_prompt = 4
+
+# Distributed Configuration
+# For MoE models, you may want more GPUs for expert parallelism (future)
+[parallel_dims]
+dp = 4   # Data parallel across 4 GPUs
+tp = 1   # Tensor parallelism (unused for now)
+pp = 1   # Pipeline parallelism (unused for now)
+# ep = 1   # Expert parallelism (future feature)
+
+[distributed]
+backend = "nccl"
+
+# Data Configuration
+[data]
+generations_dir = "./data/generations"
+max_sequence_length = 8192  # Trinity Mini supports up to 128K
+
+# Checkpoint Configuration
+[checkpoint]
+save_dir = "./models"
+save_interval = 1  # Save after every batch
+keep_latest_k = 3
+
+# Notes for MoE Training:
+# ----------------------
+# 1. With freeze_experts=true, only ~10-15% of parameters are trainable
+# 2. Training will be faster but may have different convergence characteristics
+# 3. Make sure your vLLM/sglang generator is configured to load the model
+# 4. Expert parallelism (EP) is not yet implemented, use more GPUs via dp instead
