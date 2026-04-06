@@ -339,16 +339,21 @@ class AsyncBatchOrchestrator:
                     f"[Batch {batch_num}] Flushed {len(grouped_records)} remaining groups to {batch_file}"
                 )
 
+    # Per-request timeout for vLLM proxy calls (seconds).
+    # Long enough for multi-tool trajectories; prevents workers hanging forever.
+    _VLLM_TIMEOUT_S: int = 600  # 10 minutes
+
     async def gpu_worker(self, worker_id: int):
         """
         Consumes tasks from task_queue.
         Sends HTTP requests to vLLM Proxy.
         Streams tokens and checks for tool tags.
         """
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(total=self._VLLM_TIMEOUT_S)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             while True:
                 traj = await self.task_queue.get()
-                
+
                 try:
                     logger.debug(f"[GPU-{worker_id}] Processing Traj {traj.id}")
                     
@@ -498,8 +503,13 @@ class AsyncBatchOrchestrator:
                         
                         # Mark as done in final logic
                         
+                except asyncio.TimeoutError:
+                    logger.error(
+                        f"[GPU-{worker_id}] Request timed out after {self._VLLM_TIMEOUT_S}s "
+                        f"for Traj {traj.id}. Dropping trajectory."
+                    )
                 except Exception as e:
-                    logger.error(f"[GPU-{worker_id}] Exception: {e}")
+                    logger.error(f"[GPU-{worker_id}] Exception processing Traj {traj.id}: {e}")
                 finally:
                     self.task_queue.task_done()
 
@@ -550,22 +560,20 @@ class AsyncBatchOrchestrator:
                 len_prefix = len(prefix_ids)
                 len_suffix = len(suffix_ids)
 
-                # Prepare mask: 1 = model-generated (learnable), 0 = tool result (masked)
-                # User request: Mask ONLY the tokens between <tool_result> and </tool_result>
+                # mask: 1 = model-generated token (include in loss)
+                #       0 = tool result content (exclude from loss)
+                # We unmask the surrounding <tool_result> / </tool_result>\n tags so the
+                # model learns to emit them, but mask the inner content (injected by the tool).
                 mask = [0] * num_tokens
-                
-                # Unmask the tags if total length accommodates them
+
                 if num_tokens >= len_prefix + len_suffix:
-                    # Unmask prefix (<tool_result>)
+                    # Unmask <tool_result> prefix
                     for i in range(len_prefix):
                         mask[i] = 1
-                    # Unmask suffix (</tool_result>\n)
+                    # Unmask </tool_result>\n suffix
                     for i in range(len_suffix):
                         mask[num_tokens - len_suffix + i] = 1
-                else:
-                    # Fallback for weird edge cases: unmask everything if shorter than tags equivalent
-                    # This shouldn't happen with valid strings
-                    mask = [1] * num_tokens # or 0? user wants to mask content. 
+                # else: result shorter than tags (should never happen); leave all masked (0).
 
                 # Append mask and placeholder logprobs
                 traj.action_mask.extend(mask)
