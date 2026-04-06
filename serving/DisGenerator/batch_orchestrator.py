@@ -32,6 +32,9 @@ from reward_functions import compute_reward
 # PolicyManager for hot-swapping LoRA adapters
 from policy_manager import PolicyManager
 
+# BufferQueue: in-memory async deque shared with the trainer
+from buffer_queue import BufferQueue
+
 # Tokenizer for proper token ID extraction
 from transformers import AutoTokenizer
 
@@ -56,7 +59,21 @@ class Trajectory:
     expected_answer: str = ""
 
 class AsyncBatchOrchestrator:
-    def __init__(self, proxy_url: str, model: str = "Qwen/Qwen3-4B-Thinking-2507", tokenizer_name: str = "Qwen/Qwen3-4B-Thinking-2507", num_gpu_workers: int = 4, num_tool_workers: int = 32, output_dir: str = None, batch_size: int = 10, num_completions_per_prompt: int = 4, generation_temperature: float = 1.0, enabled_tools: Optional[Iterable[str]] = None, policy_manager: Optional[PolicyManager] = None):
+    def __init__(
+        self,
+        proxy_url: str,
+        model: str = "Qwen/Qwen3-4B-Thinking-2507",
+        tokenizer_name: str = "Qwen/Qwen3-4B-Thinking-2507",
+        num_gpu_workers: int = 4,
+        num_tool_workers: int = 32,
+        output_dir: str = None,
+        batch_size: int = 10,
+        num_completions_per_prompt: int = 4,
+        generation_temperature: float = 1.0,
+        enabled_tools: Optional[Iterable[str]] = None,
+        policy_manager: Optional[PolicyManager] = None,
+        buffer_queue: Optional[BufferQueue] = None,
+    ):
         self.proxy_url = proxy_url
         self.model = model  # Can be base model or LoRA adapter name
         self.task_queue = asyncio.Queue()  # For GPU tasks
@@ -65,38 +82,50 @@ class AsyncBatchOrchestrator:
 
         # PolicyManager for hot-swapping LoRA adapters (optional)
         self.policy_manager = policy_manager
-        
-        # Output configuration - save as batch files to DisTrainer
-        if output_dir is None:
-            # Default to DisTrainer's data/generations folder
-            output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../DisTrainer/data/generations"))
-        self.output_dir = ensure_output_dir(output_dir)
-        self.batch_counter = get_next_batch_number(self.output_dir)
+
+        # BufferQueue: when provided, completed groups are pushed here instead of
+        # being written to disk.  Falls back to file-based output when None.
+        self.buffer_queue = buffer_queue
+
+        # File-based output (used only when buffer_queue is None)
+        if buffer_queue is None:
+            if output_dir is None:
+                output_dir = os.path.abspath(
+                    os.path.join(os.path.dirname(__file__), "../DisTrainer/data/generations")
+                )
+            self.output_dir = ensure_output_dir(output_dir)
+            self.batch_counter = get_next_batch_number(self.output_dir)
+        else:
+            # Keep output_dir around in case flush_pending is called without a queue
+            self.output_dir = output_dir
+            self.batch_counter = 0
+
         self._batch_lock = asyncio.Lock()
-        
-        # Batch accumulation - collect N complete GROUPS (prompts) before writing
-        # batch_size now refers to number of PROMPTS, not trajectories
-        # e.g., batch_size=10 with num_completions_per_prompt=4 = 40 trajectories per batch
-        self.batch_size = batch_size  # Number of prompts per batch file
+
+        # Batch accumulation – collect N complete GROUPS (prompts) before flushing.
+        # With buffer_queue: each complete group is pushed immediately (batch_size
+        # is still used by flush_pending for leftover groups written to disk).
+        # Without buffer_queue: batch_size groups are written to one JSONL file.
+        self.batch_size = batch_size  # Number of prompts per batch file (file mode)
         self._pending_groups: Dict[str, List[Dict]] = {}  # group_id -> list of records
-        
+
         # GRPO configuration
         self.num_completions_per_prompt = num_completions_per_prompt
         self.generation_temperature = generation_temperature
-        
+
         self.num_gpu_workers = num_gpu_workers
         self.num_tool_workers = num_tool_workers
         self.workers: List[asyncio.Task] = []
-        
+
         # Initialize tokenizer for proper token ID extraction
         logger.info(f"Loading tokenizer: {tokenizer_name}")
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True)
         logger.info(f"Tokenizer loaded. Vocab size: {len(self.tokenizer)}")
-        
+
         # Stop strings for vLLM to pause generation immediately on tool call
         self.tool_stop_tokens = [f"</{tool}>" for tool in self.enabled_tools]
         self.stop_tokens = [*self.tool_stop_tokens, "</solution>"]
-        
+
         # Context window configuration
         self.max_model_len = 65536  # Model's max context length (64K)
         self.min_completion_tokens = 256  # Minimum tokens to reserve for completion
@@ -190,94 +219,125 @@ class AsyncBatchOrchestrator:
         # Accumulate record by group_id for GRPO grouping
         async with self._batch_lock:
             group_id = record.get("group_id", traj.id)
-            
+
             # Add to pending group
             if group_id not in self._pending_groups:
                 self._pending_groups[group_id] = []
             self._pending_groups[group_id].append(record)
-            
-            # Check if this group is now complete
+
             group_size = len(self._pending_groups[group_id])
             logger.info(f"[Group {group_id}] Completion {group_size}/{self.num_completions_per_prompt}")
-            
-            # Count complete groups (groups with all completions)
-            complete_groups = [
-                g_id for g_id, records in self._pending_groups.items()
-                if len(records) >= self.num_completions_per_prompt
-            ]
-            
-            # When we have batch_size complete groups, write them all to a file
-            if len(complete_groups) >= self.batch_size:
-                batch_num = self.batch_counter
-                self.batch_counter += 1
-                
-                # Build grouped records (one per group with all completions)
-                grouped_records = []
-                for g_id in complete_groups[:self.batch_size]:
-                    group_records = self._pending_groups.pop(g_id)
-                    
-                    # Take prompt info from first record
+
+            # Once all completions for this group have arrived, assemble and dispatch.
+            if group_size >= self.num_completions_per_prompt:
+                group_records = self._pending_groups.pop(group_id)
+                first = group_records[0]
+                grouped_record = {
+                    "group_id": group_id,
+                    "prompt": first.get("prompt"),
+                    "prompt_ids": first.get("prompt_ids"),
+                    "completions": [r.get("completion") for r in group_records],
+                    "metadata": {
+                        "num_completions": len(group_records),
+                        "timestamp": first.get("metadata", {}).get("timestamp"),
+                    },
+                }
+
+                if self.buffer_queue is not None:
+                    # ── Queue mode: push directly into the in-memory deque ──
+                    added = await self.buffer_queue.put(grouped_record)
+                    q_stats = self.buffer_queue.stats()
+                    logger.info(
+                        f"[Group {group_id}] → BufferQueue "
+                        f"(size={q_stats['size']}/{q_stats['maxlen']}, "
+                        f"evicted={'yes' if not added else 'no'})"
+                    )
+                else:
+                    # ── File mode (legacy): batch up and write to JSONL ──
+                    # Re-insert so the file-batch accumulator can see it.
+                    # We reuse _pending_groups with a sentinel key to hold
+                    # complete groups waiting for the file batch threshold.
+                    if "_ready" not in self._pending_groups:
+                        self._pending_groups["_ready"] = []
+                    self._pending_groups["_ready"].append(grouped_record)
+
+                    ready = self._pending_groups["_ready"]
+                    if len(ready) >= self.batch_size:
+                        batch_num = self.batch_counter
+                        self.batch_counter += 1
+                        grouped_records = self._pending_groups.pop("_ready")
+
+                        batch_file = os.path.join(self.output_dir, f"batch_{batch_num:05d}.jsonl")
+                        loop = asyncio.get_running_loop()
+                        await loop.run_in_executor(None, write_batch_file, batch_file, grouped_records)
+                        logger.info(
+                            f"[Batch {batch_num}] Saved {len(grouped_records)} groups "
+                            f"({self.num_completions_per_prompt} completions each) to {batch_file}"
+                        )
+                    else:
+                        logger.info(
+                            f"[Group {group_id}] Buffered for file batch "
+                            f"({len(ready)}/{self.batch_size} groups ready)"
+                        )
+            else:
+                logger.info(
+                    f"[Traj {traj.id}] Added to group {group_id}. "
+                    f"Pending completions: {group_size}/{self.num_completions_per_prompt}"
+                )
+
+    async def flush_pending(self):
+        """
+        Flush any remaining records (including incomplete groups).
+
+        Queue mode:  partial groups are pushed into the BufferQueue as-is so
+                     the trainer can still learn from them.
+        File mode:   writes a final JSONL batch to disk.
+        """
+        async with self._batch_lock:
+            if not self._pending_groups:
+                return
+
+            grouped_records = []
+
+            # Collect the "_ready" file-batch list (file mode only)
+            ready = self._pending_groups.pop("_ready", [])
+            grouped_records.extend(ready)
+
+            # Collect any partially-complete groups (all modes)
+            for g_id, group_records in self._pending_groups.items():
+                if group_records:
                     first = group_records[0]
-                    grouped_record = {
+                    grouped_records.append({
                         "group_id": g_id,
                         "prompt": first.get("prompt"),
                         "prompt_ids": first.get("prompt_ids"),
                         "completions": [r.get("completion") for r in group_records],
                         "metadata": {
                             "num_completions": len(group_records),
-                            "timestamp": first.get("metadata", {}).get("timestamp")
-                        }
-                    }
-                    grouped_records.append(grouped_record)
-                
+                            "timestamp": first.get("metadata", {}).get("timestamp"),
+                        },
+                    })
+            self._pending_groups = {}
+
+            if not grouped_records:
+                return
+
+            if self.buffer_queue is not None:
+                for gr in grouped_records:
+                    await self.buffer_queue.put(gr)
+                logger.info(
+                    f"[flush_pending] Pushed {len(grouped_records)} remaining groups "
+                    f"into BufferQueue. {self.buffer_queue}"
+                )
+            else:
+                batch_num = self.batch_counter
+                self.batch_counter += 1
                 batch_file = os.path.join(self.output_dir, f"batch_{batch_num:05d}.jsonl")
-                
-                # Write batch asynchronously
                 loop = asyncio.get_running_loop()
                 await loop.run_in_executor(None, write_batch_file, batch_file, grouped_records)
                 logger.info(
-                    f"[Batch {batch_num}] Saved {len(grouped_records)} groups "
-                    f"({self.batch_size} groups × {self.num_completions_per_prompt} completions) to {batch_file}"
+                    f"[Batch {batch_num}] Flushed {len(grouped_records)} remaining groups to {batch_file}"
                 )
-            else:
-                pending_groups_count = len(self._pending_groups)
-                complete_count = len(complete_groups)
-                logger.info(
-                    f"[Traj {traj.id}] Added to group {group_id}. "
-                    f"Pending: {pending_groups_count} groups ({complete_count} complete, need {self.batch_size})"
-                )
-
-    async def flush_pending(self):
-        """Flush any remaining records (including incomplete groups) to a final batch file."""
-        async with self._batch_lock:
-            if self._pending_groups:
-                batch_num = self.batch_counter
-                self.batch_counter += 1
-                
-                # Build grouped records from all remaining groups
-                grouped_records = []
-                for g_id, group_records in self._pending_groups.items():
-                    if group_records:
-                        first = group_records[0]
-                        grouped_record = {
-                            "group_id": g_id,
-                            "prompt": first.get("prompt"),
-                            "prompt_ids": first.get("prompt_ids"),
-                            "completions": [r.get("completion") for r in group_records],
-                            "metadata": {
-                                "num_completions": len(group_records),
-                                "timestamp": first.get("metadata", {}).get("timestamp")
-                            }
-                        }
-                        grouped_records.append(grouped_record)
-                self._pending_groups = {}
-                
-                if grouped_records:
-                    batch_file = os.path.join(self.output_dir, f"batch_{batch_num:05d}.jsonl")
-                    
-                    loop = asyncio.get_running_loop()
-                    await loop.run_in_executor(None, write_batch_file, batch_file, grouped_records)
-                    logger.info(f"[Batch {batch_num}] Flushed {len(grouped_records)} remaining groups to {batch_file}")
 
     async def gpu_worker(self, worker_id: int):
         """
