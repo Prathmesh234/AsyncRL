@@ -13,7 +13,7 @@ from torch.distributed.checkpoint.state_dict import get_state_dict, StateDictOpt
 
 from .mesh import ParallelDims, build_mesh, init_distributed, is_main_rank
 from .models.parallelization import get_fsdp_strategy, print_trainable_parameters
-from .components import CheckpointManager, DataLoader, compute_grpo_loss, MetricsLogger
+from .components import CheckpointManager, DataLoader, compute_grpo_loss, MetricsLogger, BufferQueue
 from .components.metrics import TrainingMetrics
 
 
@@ -83,7 +83,7 @@ class Trainer:
     Handles FSDP2 setup, training loop, and checkpointing.
     """
 
-    def __init__(self, config: Config, use_base_model: bool = False):
+    def __init__(self, config: Config, use_base_model: bool = False, buffer_queue: Optional[BufferQueue] = None):
         """
         Initialize the Trainer.
 
@@ -126,8 +126,12 @@ class Trainer:
             keep_latest_k=config.checkpoint.keep_latest_k
         )
         
-        # Setup data loader
-        self.data_loader = DataLoader(config.data.generations_dir)
+        # Setup data loader (queue mode when buffer_queue provided, else file mode)
+        self.data_loader = DataLoader(
+            config.data.generations_dir,
+            buffer_queue=buffer_queue,
+            batch_size=config.training.num_generations_per_prompt,
+        )
         
         # Setup metrics logger
         self.metrics_logger = MetricsLogger()
