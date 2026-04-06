@@ -125,23 +125,56 @@ async def load_prompts(file_path: str, system_prompt: str = "") -> List[Trajecto
 
     return trajectories
 
-async def monitor_progress(orchestrator: AsyncBatchOrchestrator, total_tasks: int):
-    """Monitor and print the progress of the orchestrator."""
-    # This is a placeholder. Real implementation would track completed tasks 
-    # via a shared counter or checking orchestrator state. 
-    # For now, we run indefinitely or until interrupted.
-    logger.info("Monitoring started... (Press Ctrl+C to stop)")
+async def generation_loop(orchestrator: AsyncBatchOrchestrator):
+    """
+    Continuously feed the orchestrator with new prompts.
+
+    This is the heart of async RL: the generator never stops.  After every
+    pass through the prompt file it reloads it (so you can update prompts
+    while running) and immediately starts a new round.  The orchestrator's
+    workers consume from the task queue in parallel, so new trajectories are
+    being generated while earlier ones are already being written and consumed
+    by the trainer.
+
+    The policy is hot-swapped transparently via PolicyManager: workers will
+    pick up the latest LoRA adapter on their next request without any
+    interruption.
+    """
+    generation = 0
     while True:
-        # In a real system, checking queue sizes gives an idea of progress
-        q_task = orchestrator.task_queue.qsize()
-        q_tool = orchestrator.tool_queue.qsize()
-        logger.info(f"Queue Status -> Task: {q_task} | Tool: {q_tool}")
-        if q_task == 0 and q_tool == 0:
-             # Very naive completion check - waits for queues to drain. 
-             # Does not account for active workers.
-             # Ideally orchestrator exposes an active_count.
-             pass
-        await asyncio.sleep(5)
+        generation += 1
+        logger.info(f"Generation {generation}: loading prompts from {PROMPTS_FILE}")
+        trajectories = await load_prompts(PROMPTS_FILE, system_prompt=SYSTEM_PROMPT)
+
+        if not trajectories:
+            logger.warning("No prompts found. Retrying in 10s...")
+            await asyncio.sleep(10)
+            continue
+
+        logger.info(
+            f"Generation {generation}: enqueueing {len(trajectories)} prompts "
+            f"({len(trajectories) * orchestrator.num_completions_per_prompt} trajectories)"
+        )
+
+        for traj in trajectories:
+            await orchestrator.add_trajectory(traj)
+
+        # Wait for this round's tasks to drain before starting the next pass.
+        # This keeps back-pressure: we don't pile up hundreds of pending tasks
+        # when the generation side is faster than the trainer.
+        while True:
+            q_task = orchestrator.task_queue.qsize()
+            q_tool = orchestrator.tool_queue.qsize()
+            if q_task == 0 and q_tool == 0:
+                break
+            logger.info(
+                f"Generation {generation}: waiting for queues to drain "
+                f"(task={q_task}, tool={q_tool})"
+            )
+            await asyncio.sleep(5)
+
+        logger.info(f"Generation {generation} complete. Starting next round.")
+
 
 async def main():
     args = parse_args()
@@ -187,7 +220,6 @@ async def main():
         logger.info(f"Initial policy: {initial_policy}")
 
     # 2. Initialize Orchestrator
-    # batch_size in orchestrator is number of TRAJECTORIES (prompts * completions)
     orchestrator = AsyncBatchOrchestrator(
         proxy_url=PROXY_URL,
         model=MODEL,
@@ -195,41 +227,27 @@ async def main():
         num_gpu_workers=NUM_GPU_WORKERS,
         num_tool_workers=NUM_TOOL_WORKERS,
         output_dir=OUTPUT_DIR,
-        batch_size=BATCH_SIZE,  # Number of complete GROUPS (prompts) per batch
+        batch_size=BATCH_SIZE,
         num_completions_per_prompt=NUM_COMPLETIONS,
         generation_temperature=GENERATION_TEMPERATURE,
         enabled_tools=enabled_tools,
-        policy_manager=policy_manager  # Enable hot-swap
+        policy_manager=policy_manager,
     )
 
-    # 3. Start Workers
+    # 3. Start workers
     await orchestrator.start()
 
-    # 3. Load Prompts (with system prompt from .env)
-    trajectories = await load_prompts(PROMPTS_FILE, system_prompt=SYSTEM_PROMPT)
-    logger.info(f"Loaded {len(trajectories)} trajectories.")
-    if SYSTEM_PROMPT:
-        logger.info(f"System prompt injected ({len(SYSTEM_PROMPT)} chars)")
-
-    # 4. Enqueue Tasks
-    for traj in trajectories:
-        await orchestrator.add_trajectory(traj)
-
-    # 5. Monitor execution
+    # 4. Run the continuous generation loop
     try:
-        # For this simple client, we just wait for user interrupt or until logic finishes
-        # A more robust client would collect results and save to file.
-        await monitor_progress(orchestrator, len(trajectories))
+        await generation_loop(orchestrator)
     except asyncio.CancelledError:
-        logger.info("Client cancelled.")
+        logger.info("Generation loop cancelled.")
     finally:
-        # Flush any remaining trajectories to disk
         await orchestrator.flush_pending()
         await orchestrator.stop()
-
-        # Stop policy watcher
         if policy_manager is not None:
             policy_manager.stop_watching()
+
 
 if __name__ == "__main__":
     try:

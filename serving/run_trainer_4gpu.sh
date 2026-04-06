@@ -32,16 +32,23 @@ echo ""
 echo "Configuration: config/train_config.toml"
 echo ""
 
-# Check if initial policy exists
-if [ ! -d "./models/policy-0-initial" ]; then
-    echo "ERROR: Initial policy not found at ./models/policy-0-initial"
+# Check if an initial policy exists (any policy-N directory will do)
+MODELS_DIR="./models"
+mkdir -p "$MODELS_DIR"
+if ! ls "$MODELS_DIR"/policy-* 1>/dev/null 2>&1; then
+    echo "WARNING: No initial policy checkpoint found in $MODELS_DIR"
     echo ""
-    echo "Please copy the checkpoint from ToolGRPOTrainer:"
-    echo "  cp -r ../ToolGRPOTrainer/grpo-streamed/checkpoint-10 ./models/policy-0-initial"
-    exit 1
+    echo "The trainer will create a fresh LoRA adapter from the base model."
+    echo "To start from a pre-trained adapter, place it at:"
+    echo "  $MODELS_DIR/policy-0-initial/"
+    echo "(must contain adapter_config.json and adapter_model.safetensors)"
+    echo ""
+    echo "Continuing with --use-base-model flag..."
+    USE_BASE_MODEL="--use-base-model"
+else
+    echo "Found existing policy checkpoint(s) in $MODELS_DIR"
+    USE_BASE_MODEL=""
 fi
-
-echo "Found initial policy: ./models/policy-0-initial"
 echo ""
 
 # Create data directory if it doesn't exist
@@ -61,4 +68,4 @@ echo ""
 # Note: CUDA_VISIBLE_DEVICES makes GPU indices 0,1 inside the process
 # We add ".." to PYTHONPATH so we can run DisTrainer as a module from inside its directory
 export PYTHONPATH=..:$PYTHONPATH
-torchrun --nproc_per_node=2 -m DisTrainer.train --config config/train_config.toml
+torchrun --nproc_per_node=2 -m DisTrainer.train --config config/train_config.toml $USE_BASE_MODEL

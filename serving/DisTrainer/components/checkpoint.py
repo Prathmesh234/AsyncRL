@@ -54,42 +54,59 @@ class CheckpointManager:
     
     def save(self, state_dict: Dict[str, Any], step: int) -> str:
         """
-        Save a sharded checkpoint using DCP.
+        Save a sharded DCP checkpoint.
         Each rank saves its own shard.
-        
+
         Names checkpoints as: policy-{N}-{YYYYMMDD_HHMMSS}
-        
+
+        NOTE: This method intentionally does NOT update the latest_adapter symlink.
+        Call finalize_policy(path) AFTER the HF adapter has been written to that
+        path so DisGenerator never sees a half-written checkpoint.
+
         Args:
             state_dict: Dictionary containing model and optimizer state
             step: Current training step (included in metadata)
-        
+
         Returns:
-            Path to the saved checkpoint
+            Path to the saved checkpoint directory
         """
         # Get next policy version
         policy_version = self._get_next_policy_version()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
+
         checkpoint_name = f"policy-{policy_version}-{timestamp}"
         checkpoint_path = self.checkpoint_dir / checkpoint_name
         checkpoint_path.mkdir(exist_ok=True)
-        
-        # Add step to state_dict for reference
+
+        # Store step + version for recovery
         state_dict["step"] = step
         state_dict["policy_version"] = policy_version
-        
+
         dcp.save(
             state_dict=state_dict,
             checkpoint_id=str(checkpoint_path)
         )
-        
-        # Cleanup and update symlink (only on main rank)
+
         if is_main_rank():
             self._cleanup_old_checkpoints()
-            self._update_latest_symlink(checkpoint_path)
-            print(f"💾 Saved checkpoint: {checkpoint_name} (step {step})")
-        
+            print(f"Saved DCP checkpoint: {checkpoint_name} (step {step})")
+
         return str(checkpoint_path)
+
+    def finalize_policy(self, checkpoint_path: str):
+        """
+        Atomically expose a fully-written checkpoint to DisGenerator.
+
+        Call this AFTER the HF LoRA adapter has been saved to checkpoint_path.
+        Updates the 'latest_adapter' symlink and writes the .policy_ready signal
+        so PolicyManager picks up the new policy without racing on a partial write.
+
+        Only executed on main rank; all other ranks are no-ops.
+        """
+        if not is_main_rank():
+            return
+        self._update_latest_symlink(Path(checkpoint_path))
+        print(f"Policy finalized: {Path(checkpoint_path).name}")
 
     
     def load(self, state_dict: Dict[str, Any], step: Optional[int] = None) -> int:

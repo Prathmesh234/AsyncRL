@@ -190,7 +190,7 @@ def distributed_worker(trainer_instance: Trainer, auto_train: bool = True, poll_
                             "id": f"auto-{uuid.uuid4().hex[:8]}",
                             "auto": True  # Mark as auto-generated
                         }
-                        print(f"New batch detected! Starting auto-training...")
+                        print(f"New batch detected, starting training step...")
         
         # 2. Broadcast the decision (Command or None) to everyone
         object_list = [cmd_data]
@@ -222,19 +222,12 @@ def distributed_worker(trainer_instance: Trainer, auto_train: bool = True, poll_
                 
                 m = trainer_instance.train_step()
                 metrics_list.append(m)
-                
+
                 # If no data, everyone stops together
                 if m.get("status") == "no_data":
                     if is_main_rank() and is_auto:
-                        print("⏳ No more batches available. Waiting for new data...")
+                        print("No more batches available. Waiting for new data...")
                     break
-                    
-                # Log progress
-                if is_main_rank():
-                    loss = m.get("loss", 0)
-                    avg_reward = m.get("avg_reward", 0)
-                    step = m.get("step", 0)
-                    print(f"✅ Step {step}: loss={loss:.4f}, avg_reward={avg_reward:.3f}")
             
             # Auto-training: delete processed batch files (checkpoint is handled by trainer interval)
             if is_auto and metrics_list and metrics_list[-1].get("status") != "no_data":

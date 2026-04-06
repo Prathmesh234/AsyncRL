@@ -244,22 +244,25 @@ class Trainer:
         return model, tokenizer
     
     def _try_resume(self):
-        """Try to resume from latest checkpoint."""
-        if self.checkpoint_manager.has_checkpoint():
-            try:
-                state_dict = {
-                    "model": self.model.state_dict(),
-                    "optimizer": self.optimizer.state_dict(),
-                    "step": self.step
-                }
-                loaded_step = self.checkpoint_manager.load(state_dict)
-                self.step = state_dict.get("step", loaded_step)
-                
-                if is_main_rank():
-                    print(f"Resumed from checkpoint at step {self.step}")
-            except Exception as e:
-                if is_main_rank():
-                    print(f"Failed to resume from checkpoint: {e}")
+        """Try to resume from the latest DCP checkpoint."""
+        if not self.checkpoint_manager.has_checkpoint():
+            return
+        try:
+            state_dict = {
+                "model": self.model.state_dict(),
+                "optimizer": self.optimizer.state_dict(),
+                "step": 0,  # Will be overwritten by DCP load
+            }
+            self.checkpoint_manager.load(state_dict)
+            # DCP restores the "step" key in-place; fall back to 0 if it
+            # wasn't persisted (e.g. very old checkpoint format).
+            self.step = state_dict.get("step", 0)
+
+            if is_main_rank():
+                print(f"Resumed from checkpoint at step {self.step}")
+        except Exception as e:
+            if is_main_rank():
+                print(f"Failed to resume from checkpoint: {e}. Starting from step 0.")
     
     def train_step(self) -> Dict[str, Any]:
         """
@@ -348,61 +351,68 @@ class Trainer:
         }
     
     def save_checkpoint(self) -> str:
-        """Save a checkpoint."""
+        """
+        Save a checkpoint and expose the new policy to DisGenerator.
+
+        Order of operations (critical for correctness):
+          1. Save DCP checkpoint (training state for resumption)
+          2. Save HF PEFT adapter (vLLM-compatible LoRA weights)
+          3. Update latest_adapter symlink + .policy_ready signal
+             → DisGenerator only sees a fully-written checkpoint
+        """
         state_dict = {
             "model": self.model.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "step": self.step
         }
         path = self.checkpoint_manager.save(state_dict, self.step)
-        
-        if is_main_rank():
-            print(f"Saved DCP checkpoint at step {self.step}")
-            
+
         # ------------------------------------------------------------------
-        # NEW: Save HF PEFT Adapter for vLLM compatibility
-        # vLLM requires 'adapter_config.json' and 'adapter_model.safetensors'
+        # Save HF PEFT Adapter for vLLM hot-swap compatibility.
+        # vLLM requires adapter_config.json + adapter_model.safetensors.
+        # We must finish writing these BEFORE signalling DisGenerator.
         # ------------------------------------------------------------------
+        adapter_saved = False
         if self.config.model.use_lora:
             try:
                 from peft import get_peft_model_state_dict
-                
+
                 if is_main_rank():
                     print("Gathering LoRA weights for vLLM export...")
-                
-                # 1. Gather full state dict (cpu offloaded to save GPU mem)
-                # This handles the FSDP2 un-sharding logic transparently
+
+                # Gather full (un-sharded) state dict on CPU to save GPU mem
                 options = StateDictOptions(full_state_dict=True, cpu_offload=True)
                 full_state_dict = get_state_dict(self.model, options=options)
-                
+
                 if is_main_rank():
-                    # 2. Extract only the PEFT adapter weights from the full state dict
-                    # get_peft_model_state_dict filters for only the trainable adapter params
                     try:
                         adapter_state_dict = get_peft_model_state_dict(
-                            self.model, 
+                            self.model,
                             state_dict=full_state_dict
                         )
-                        
-                        # 3. Save using PEFT's save_pretrained with the filtered adapter state
                         self.model.save_pretrained(path, state_dict=adapter_state_dict)
-                        print(f"✅ Saved HF Adapter to {path}")
-                        
                         del adapter_state_dict
+                        adapter_saved = True
+                        print(f"Saved HF Adapter to {path}")
                     except Exception as e:
-                        print(f"⚠️ Failed to save HF Adapter: {e}")
+                        print(f"Warning: Failed to save HF Adapter: {e}")
                         import traceback
                         traceback.print_exc()
-                    
-                    # Cleanup the full state dict
-                    del full_state_dict
+                    finally:
+                        del full_state_dict
                 else:
-                    # Other ranks just cleanup
                     del full_state_dict
-                    
+
             except ImportError as e:
                 if is_main_rank():
-                    print(f"⚠️ PEFT not available for HF adapter export: {e}")
+                    print(f"Warning: PEFT not available for HF adapter export: {e}")
+
+        # ------------------------------------------------------------------
+        # Signal DisGenerator ONLY after adapter is fully on disk.
+        # finalize_policy() updates the symlink + .policy_ready file.
+        # ------------------------------------------------------------------
+        if adapter_saved:
+            self.checkpoint_manager.finalize_policy(path)
 
         return path
     
