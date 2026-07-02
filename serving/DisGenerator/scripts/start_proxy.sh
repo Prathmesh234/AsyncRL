@@ -2,16 +2,17 @@
 # =============================================================================
 # DisGenerator - Start Proxy Server
 # =============================================================================
-# This script starts the disaggregated proxy server that coordinates
-# KV cache transfer routing between prefill and decode instances.
+# This script starts the disaggregated proxy server that routes requests
+# through the two-phase NIXL prefill/decode flow.
 #
 # Usage:
 #   ./start_proxy.sh
 #
 # Environment Variables:
-#   PROXY_IP          - IP to bind (default: 0.0.0.0)
-#   PROXY_ZMQ_PORT    - ZMQ port for service discovery (default: 30001)
-#   PROXY_HTTP_PORT   - HTTP port for API (default: 10001)
+#   PROXY_IP           - IP to bind (default: 0.0.0.0)
+#   PROXY_HTTP_PORT    - HTTP port for API (default: 10001)
+#   PREFILL_INSTANCES  - comma-separated host:port list (default: localhost:20001)
+#   DECODE_INSTANCES   - comma-separated host:port list (default: localhost:20002)
 # =============================================================================
 
 set -e
@@ -43,11 +44,13 @@ fi
 
 # Export environment variables (can be overridden)
 export PROXY_IP="${PROXY_IP:-0.0.0.0}"
-export PROXY_ZMQ_PORT="${PROXY_ZMQ_PORT:-30001}"
 export PROXY_HTTP_PORT="${PROXY_HTTP_PORT:-10001}"
+export PREFILL_INSTANCES="${PREFILL_INSTANCES:-localhost:20001}"
+export DECODE_INSTANCES="${DECODE_INSTANCES:-localhost:20002}"
 
-echo "  ZMQ Port: $PROXY_ZMQ_PORT"
 echo "  HTTP Port: $PROXY_HTTP_PORT"
+echo "  Prefill:   $PREFILL_INSTANCES"
+echo "  Decode:    $DECODE_INSTANCES"
 echo "  Log file: logs/proxy.log"
 echo "=============================================="
 

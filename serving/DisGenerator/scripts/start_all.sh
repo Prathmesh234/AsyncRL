@@ -2,10 +2,10 @@
 # =============================================================================
 # DisGenerator - Start All Components
 # =============================================================================
-# This script starts the complete disaggregated serving stack:
-#   1. Proxy server (service discovery + API routing)
-#   2. Prefill server(s) (KV producers)
-#   3. Decode server(s) (KV consumers)
+# This script starts the complete disaggregated serving stack (NIXL):
+#   1. Proxy server (two-phase prefill/decode routing via kv_transfer_params)
+#   2. Prefill server(s)
+#   3. Decode server(s) (pull KV from prefill via NIXL)
 #
 # Usage:
 #   ./start_all.sh                    # Default: 1P1D configuration (2 GPUs)
@@ -85,8 +85,11 @@ esac
 
 # Model configuration (matches DisTrainer)
 MODEL="${MODEL:-Qwen/Qwen3-4B-Thinking-2507}"
-PROXY_PORT="${PROXY_PORT:-30001}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-600}"
+
+# Build proxy instance lists (host:port) from the HTTP ports
+PREFILL_INSTANCES="localhost:${PREFILL_HTTP_PORTS//,/,localhost:}"
+DECODE_INSTANCES="localhost:${DECODE_HTTP_PORTS//,/,localhost:}"
 
 echo ""
 echo "=============================================="
@@ -100,7 +103,9 @@ else
 fi
 echo "  Prefill GPUs:   $PREFILL_GPUS"
 echo "  Decode GPUs:    $DECODE_GPUS"
-echo "  Proxy Port:     $PROXY_PORT"
+echo "  Prefill Nodes:  $PREFILL_INSTANCES"
+echo "  Decode Nodes:   $DECODE_INSTANCES"
+echo "  KV Transfer:    NixlConnector"
 echo "  API Port:       10001"
 echo "=============================================="
 echo ""
@@ -200,7 +205,8 @@ wait_for_server() {
 # =============================================================================
 echo ""
 echo "🔄 Starting proxy server..."
-uv run python disagg_proxy.py > logs/proxy.log 2>&1 &
+PREFILL_INSTANCES="$PREFILL_INSTANCES" DECODE_INSTANCES="$DECODE_INSTANCES" \
+    uv run python disagg_proxy.py > logs/proxy.log 2>&1 &
 PIDS+=($!)
 echo "   Proxy PID: ${PIDS[-1]}"
 sleep 2
@@ -220,7 +226,7 @@ for i in "${!P_GPU_ARR[@]}"; do
     http_port="${P_HTTP_ARR[$i]}"
     kv_port="${P_KV_ARR[$i]}"
 
-    echo "   Prefill $((i+1)): GPU $gpu_id, HTTP $http_port, KV $kv_port"
+    echo "   Prefill $((i+1)): GPU $gpu_id, HTTP $http_port, NIXL side channel $kv_port"
     bash "$SCRIPT_DIR/start_prefill.sh" "$gpu_id" "$http_port" "$kv_port" $USE_BASE_MODEL &
     PIDS+=($!)
 done
@@ -240,7 +246,7 @@ for i in "${!D_GPU_ARR[@]}"; do
     http_port="${D_HTTP_ARR[$i]}"
     kv_port="${D_KV_ARR[$i]}"
 
-    echo "   Decode $((i+1)): GPU $gpu_id, HTTP $http_port, KV $kv_port"
+    echo "   Decode $((i+1)): GPU $gpu_id, HTTP $http_port, NIXL side channel $kv_port"
     bash "$SCRIPT_DIR/start_decode.sh" "$gpu_id" "$http_port" "$kv_port" $USE_BASE_MODEL &
     PIDS+=($!)
 done

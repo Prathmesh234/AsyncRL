@@ -24,10 +24,7 @@ echo "Stopping vLLM servers..."
 pkill -f "vllm serve" 2>/dev/null && echo "  ✅ vLLM servers stopped" || echo "  ⚪ vLLM servers not running"
 
 # Additional cleanup - kill any orphaned processes
-pkill -f "P2pNcclConnector" 2>/dev/null || true
-
-# Clean up any stale NCCL sockets (optional)
-# rm -f /tmp/nccl-* 2>/dev/null || true
+pkill -f "NixlConnector" 2>/dev/null || true
 
 echo ""
 echo "=============================================="
