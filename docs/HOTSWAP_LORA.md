@@ -2,99 +2,68 @@
 
 This document describes the hot-swap LoRA policy feature in AsyncRL, which enables **zero-downtime policy updates** during continuous reinforcement learning training.
 
+> **History note:** an earlier design passed a `lora_request` object in the
+> request body (`extra_body`). vLLM's OpenAI-compatible server has no such
+> parameter — `LoRARequest` exists only in the offline Python API — so those
+> requests silently kept using the adapter loaded at server startup. The
+> current design uses vLLM's real dynamic-LoRA endpoints, described below.
+
 ## Overview
 
-The hot-swap feature allows DisGenerator to automatically load new policies from DisTrainer without restarting the vLLM servers. This enables a truly continuous RL training loop where:
-
-1. DisGenerator generates rollouts using the current policy
-2. DisTrainer trains on collected rollouts and saves a new policy
-3. DisGenerator automatically detects and switches to the new policy
-4. In-flight requests complete with the old policy, new requests use the new policy
-5. No downtime, no manual intervention required
+1. DisGenerator generates rollouts using the current policy.
+2. DisTrainer trains on collected rollouts and saves a new policy under
+   `models/policy-N-timestamp/`, retargets the `latest_adapter` symlink, and
+   writes a `.policy_ready` signal.
+3. DisGenerator's `PolicyManager` detects the new policy and **loads it onto
+   every vLLM server** (prefill *and* decode) via `POST /v1/load_lora_adapter`,
+   under a fresh versioned adapter name (`grpo-adapter-v1`, `-v2`, ...).
+4. Once **all** servers accept the adapter, new requests carry the new name in
+   their `model` field. In-flight requests finish on the previous name, which
+   stays loaded; the version before that is unloaded to bound memory.
+5. No downtime, no restarts, no manual intervention.
 
 ## Architecture
-
-### Components
 
 ```
 ┌─────────────────┐
 │   DisTrainer    │
-│                 │
 │  1. Trains      │
 │  2. Saves       │────► models/policy-N-timestamp/
 │     adapter     │        ├── adapter_config.json
-│  3. Updates     │        ├── adapter_model.safetensors
-│     symlink     │        └── (DCP checkpoint files)
+│  3. Updates     │        └── adapter_model.safetensors
+│     symlink     │
 │  4. Signals     │────► models/.policy_ready
-│                 │
 └─────────────────┘
-
          ▼
-
-┌─────────────────┐
-│ DisGenerator    │
-│                 │
-│ PolicyManager   │
-│  - Watches for  │◄──── Polls models/ directory (5s)
-│    new policies │◄──── Detects .policy_ready signal
-│  - Increments   │
-│    lora_int_id  │
-│  - Provides     │────► LoRARequest(lora_int_id=N)
-│    current      │
-│    LoRARequest  │
-│                 │
-│ Orchestrator    │
-│  - Uses current │────► vLLM API with extra_body
-│    LoRARequest  │        { lora_request: {...} }
-│    in requests  │
-└─────────────────┘
-
-         ▼
-
-┌─────────────────┐
-│   vLLM Engine   │
-│                 │
-│  - Maintains    │      GPU Memory:
-│    multiple     │      ┌──────────────────┐
-│    adapters in  │      │ adapter (id=1)   │
-│    GPU memory   │      │ adapter (id=2)   │
-│  - LRU eviction │      │ adapter (id=3)   │◄── --max-loras 3
-│  - Zero-downtime│      └──────────────────┘
-│    switching    │
+┌─────────────────┐        POST /v1/load_lora_adapter
+│ DisGenerator    │      ┌──────────────────────────────┐
+│ PolicyManager   │─────►│ vLLM prefill (port 20001)    │
+│  - polls models/│─────►│ vLLM decode  (port 20002)    │
+│  - versioned    │      │  {"lora_name":"grpo-adapter-v2",
+│    names: -vN   │      │   "lora_path":"/…/policy-2-…"}│
+│  - swap only if │      └──────────────────────────────┘
+│    ALL loads OK │
+│                 │        model = "grpo-adapter-v2"
+│ Orchestrator    │─────► every new request selects the
+│                 │        adapter via the `model` field
 └─────────────────┘
 ```
 
-### Flow
+## How adapter selection works in vLLM
 
-1. **Training Phase** (DisTrainer)
-   - Trains on collected rollouts
-   - Saves checkpoint with `CheckpointManager.save()`
-   - Saves both DCP format (for resuming training) and HF PEFT format (for vLLM)
-   - Updates `latest_adapter` symlink
-   - Creates `.policy_ready` signal file
-
-2. **Detection Phase** (DisGenerator PolicyManager)
-   - Polls `DisTrainer/models/` directory every 5 seconds
-   - Detects changes to `latest_adapter` symlink
-   - Consumes `.policy_ready` signal file
-   - Increments `lora_int_id` counter
-
-3. **Hot-Swap Phase** (vLLM)
-   - New requests include `lora_request` with new `lora_int_id`
-   - vLLM loads new adapter into GPU memory (if not already loaded)
-   - Old in-flight requests continue with previous `lora_int_id`
-   - Automatic LRU eviction when GPU memory limit reached
-
-4. **Generation Phase** (DisGenerator Orchestrator)
-   - Each vLLM request queries `policy_manager.get_current_lora_request()`
-   - Includes current LoRARequest in API payload
-   - Thread-safe access ensures consistency
+- **Per-request selection** is via the OpenAI `model` parameter — the adapter
+  name acts like a model name. There is no per-request `lora_request` body
+  parameter in the HTTP API.
+- **Startup registration:** the start scripts register the initial adapter:
+  `--lora-modules "grpo-adapter=/path/to/latest_adapter"`.
+- **Runtime loading:** with `VLLM_ALLOW_RUNTIME_LORA_UPDATING=True` (exported
+  by `start_prefill.sh` / `start_decode.sh`), the server exposes
+  `POST /v1/load_lora_adapter {"lora_name", "lora_path"}` and
+  `POST /v1/unload_lora_adapter {"lora_name"}`.
 
 ## Configuration
 
-### DisGenerator
-
-**Environment Variables** (`.env` or export):
+### DisGenerator (environment variables)
 
 ```bash
 # Enable/disable hot-swap (default: true)
@@ -105,317 +74,86 @@ POLICY_POLL_INTERVAL=5.0
 
 # Models directory (default: auto-detected)
 DISTRAINER_MODELS_DIR=/path/to/DisTrainer/models
+
+# vLLM servers to push adapters to. When unset, discovered from the
+# proxy's GET /servers endpoint (recommended).
+VLLM_SERVER_URLS=http://localhost:20001,http://localhost:20002
 ```
 
-**Command-line** (simple_client.py):
+### vLLM servers
 
-The client automatically initializes PolicyManager when `ENABLE_HOTSWAP=true`:
-
-```python
-policy_manager = PolicyManager(
-    models_dir=DISTRAINER_MODELS_DIR,
-    lora_name="grpo-adapter",
-    poll_interval=POLICY_POLL_INTERVAL,
-    enable_hotswap=True
-)
-policy_manager.start_watching()
-```
-
-### vLLM Servers
-
-Both prefill and decode servers require the following flags:
+Both prefill and decode servers need (handled by the start scripts):
 
 ```bash
+export VLLM_ALLOW_RUNTIME_LORA_UPDATING=True
+
 vllm serve Qwen/Qwen3-4B-Thinking-2507 \
     --enable-lora \
     --lora-modules "grpo-adapter=/path/to/latest_adapter" \
-    --max-loras 3 \           # Keep up to 3 adapters in GPU memory
-    --max-cpu-loras 5 \       # Keep up to 5 adapters in CPU memory
-    # ... other flags
+    --max-loras 3 \        # >= PolicyManager.KEEP_LOADED (2) + headroom
+    --max-cpu-loras 5
 ```
 
-**Important Parameters**:
-- `--max-loras`: Maximum LoRA adapters in GPU memory (default: 1)
-  - Higher = more GPU memory usage but better hot-swap performance
-  - Recommended: 2-3 for continuous training
-- `--max-cpu-loras`: Maximum adapters in CPU memory (default: 0)
-  - Acts as a cache for faster re-loading
+## Swap lifecycle
 
-## Usage
+| Event | Adapter names loaded | Requests use |
+|---|---|---|
+| Startup | `grpo-adapter` | `grpo-adapter` |
+| policy-1 saved | + `grpo-adapter-v1` | `grpo-adapter-v1` |
+| policy-2 saved | + `grpo-adapter-v2`, − `grpo-adapter` | `grpo-adapter-v2` |
+| policy-3 saved | + `grpo-adapter-v3`, − `grpo-adapter-v1` | `grpo-adapter-v3` |
 
-### Quick Start
-
-1. **Start vLLM servers** (with hot-swap support):
-   ```bash
-   cd serving/DisGenerator/scripts
-   ./start_prefill.sh 0 20001 21001
-   ./start_decode.sh 1 20002 22001
-   ./start_proxy.sh
-   ```
-
-2. **Start DisGenerator** (with hot-swap enabled):
-   ```bash
-   cd serving/DisGenerator
-   ENABLE_HOTSWAP=true python simple_client.py
-   ```
-
-3. **Start DisTrainer**:
-   ```bash
-   cd serving/DisTrainer
-   torchrun --nproc_per_node=4 server.py
-   ```
-
-4. **Observe hot-swaps** in DisGenerator logs:
-   ```
-   [PolicyManager] 📥 Initial policy loaded: lora_int_id=1, path=policy-0-initial
-   [PolicyManager] 🔄 HOT-SWAP: Policy updated! Old: lora_int_id=1, New: lora_int_id=2, path=policy-1-20260120_143022
-   [GPU-0] Using LoRA: lora_int_id=2
-   ```
-
-### Disabling Hot-Swap
-
-To disable hot-swap and use a fixed policy (e.g., for evaluation):
-
-```bash
-ENABLE_HOTSWAP=false python simple_client.py
-```
-
-This loads the initial policy once and never updates it.
-
-## Implementation Details
-
-### PolicyManager
-
-**File**: `serving/DisGenerator/policy_manager.py`
-
-**Key Methods**:
-- `start_watching()`: Starts background thread that polls for new policies
-- `get_current_lora_request()`: Returns current LoRARequest (thread-safe)
-- `_detect_and_load_policy()`: Checks for policy updates and creates new LoRARequest
-- `_consume_policy_ready_signal()`: Removes `.policy_ready` signal file
-
-**Thread Safety**:
-- Uses `threading.Lock` for protecting policy state
-- Safe concurrent access from multiple GPU workers
-
-### LoRARequest
-
-**Format**:
-```python
-@dataclass
-class LoRARequest:
-    lora_name: str        # "grpo-adapter" (must match vLLM --lora-modules)
-    lora_int_id: int      # Unique ID (1, 2, 3, ...)
-    lora_path: str        # Path to adapter directory
-```
-
-**vLLM API Integration**:
-```python
-payload = {
-    "model": "Qwen/Qwen3-4B-Thinking-2507",
-    "messages": [...],
-    "extra_body": {
-        "lora_request": {
-            "lora_name": "grpo-adapter",
-            "lora_int_id": 2,
-            "lora_path": "/path/to/policy-1-20260120_143022"
-        }
-    }
-}
-```
-
-### Checkpoint Notification
-
-**File**: `serving/DisTrainer/components/checkpoint.py`
-
-**Flow**:
-1. `CheckpointManager.save()` saves checkpoint
-2. `_update_latest_symlink()` updates symlink
-3. `_create_policy_ready_signal()` writes `.policy_ready` file with timestamp
-
-**Signal File**: `DisTrainer/models/.policy_ready`
-```
-2026-01-20T14:30:22.123456
-```
-
-This file is atomic - created fully then detected by PolicyManager.
-
-## Performance Considerations
-
-### GPU Memory
-
-Each LoRA adapter requires additional GPU memory:
-- **Typical adapter size**: 50-100 MB (depending on rank and target modules)
-- **--max-loras 3**: ~150-300 MB additional GPU memory
-
-**Trade-off**:
-- Higher `--max-loras` = smoother hot-swaps but more GPU memory
-- Lower `--max-loras` = less GPU memory but potential loading delays
-
-### Latency
-
-**First request with new adapter**:
-- ~100-500ms loading time (if not in GPU memory)
-- Subsequent requests: ~0ms overhead (already loaded)
-
-**Recommended**:
-- Use `--max-loras 3` to keep current + 1-2 previous adapters in memory
-- Old in-flight requests complete without loading delays
-
-### Polling Interval
-
-**Default**: 5 seconds
-
-**Trade-off**:
-- Lower interval (1-2s) = faster detection but more I/O overhead
-- Higher interval (10-30s) = less overhead but slower updates
-
-**Recommendation**: 5s is a good balance for continuous training
+Failure handling: if **any** server rejects `load_lora_adapter`, the swap is
+aborted — requests keep the old adapter name and the watcher retries on the
+next poll. This keeps prefill and decode consistent: a request routed through
+both phases always references a name both servers know.
 
 ## Monitoring
 
-### Log Messages
-
-**DisGenerator** (PolicyManager):
+**DisGenerator (PolicyManager):**
 ```
-[PolicyManager] 📥 Initial policy loaded: lora_int_id=1, path=policy-0-initial
-[PolicyManager] 🔄 HOT-SWAP: Policy updated! Old: lora_int_id=1, New: lora_int_id=2, path=policy-1-20260120_143022
-[GPU-0] Using LoRA: lora_int_id=2
-```
-
-**DisTrainer** (CheckpointManager):
-```
-💾 Saved checkpoint: policy-1-20260120_143022 (step 100)
-✅ Saved HF Adapter to /path/to/policy-1-20260120_143022
-📢 Created .policy_ready signal for DisGenerator
+📥 Initial policy: model_name=grpo-adapter, path=policy-0-initial (registered at server startup)
+Loaded grpo-adapter-v1 on http://localhost:20001
+Loaded grpo-adapter-v1 on http://localhost:20002
+🔄 HOT-SWAP: grpo-adapter → grpo-adapter-v1 (path=policy-1-20260701_143022) on 2 servers
+Unloaded grpo-adapter on http://localhost:20001
 ```
 
-### Debugging
+**Check current policy:**
+```python
+policy_manager.get_current_policy_info()
+# {'status': 'active', 'model_name': 'grpo-adapter-v2', 'version': 2,
+#  'path': '/…/policy-2-…', 'servers': ['http://localhost:20001', …]}
+```
 
-**Check current policy**:
+**Check what a server has loaded:**
 ```bash
-# In DisGenerator Python shell or script:
-policy_info = policy_manager.get_current_policy_info()
-print(policy_info)
-# {'status': 'active', 'lora_name': 'grpo-adapter', 'lora_int_id': 2, 'path': '/path/to/policy-1-...'}
-```
-
-**Check latest_adapter symlink**:
-```bash
-ls -l serving/DisTrainer/models/latest_adapter
-# lrwxrwxrwx 1 user user 23 Jan 20 14:30 latest_adapter -> policy-1-20260120_143022
-```
-
-**Check signal file** (should not persist):
-```bash
-ls serving/DisTrainer/models/.policy_ready
-# Should be deleted after PolicyManager consumes it
+curl http://localhost:20001/v1/models | jq '.data[].id'
+# "Qwen/Qwen3-4B-Thinking-2507", "grpo-adapter", "grpo-adapter-v1", ...
 ```
 
 ## Troubleshooting
 
-### Issue: Hot-swap not detected
+### New policies saved but requests still use the old adapter
+1. Verify `ENABLE_HOTSWAP=true` on the client.
+2. Check PolicyManager logs for `load_lora_adapter` errors — a single failing
+   server blocks every swap by design.
+3. Verify the servers were started with `VLLM_ALLOW_RUNTIME_LORA_UPDATING=True`
+   (the endpoints return 404/405 otherwise).
+4. Verify the server list: `curl http://localhost:10001/servers`.
 
-**Symptoms**: New policies saved but DisGenerator still uses old policy
+### `load_lora_adapter` returns 400
+- The adapter directory must contain `adapter_config.json` +
+  `adapter_model.safetensors`. If DisTrainer is mid-write, the next poll will
+  retry — the `.policy_ready` signal exists precisely so consumers don't read
+  half-written checkpoints.
+- Expert-layer LoRA (MoE) requires vLLM >= 0.15.
 
-**Checks**:
-1. Verify `ENABLE_HOTSWAP=true`
-2. Check PolicyManager logs for errors
-3. Verify `latest_adapter` symlink exists and points to new policy
-4. Check `.policy_ready` signal is being created (may be deleted immediately)
-
-**Solution**:
-```bash
-# Restart DisGenerator with debug logging
-ENABLE_HOTSWAP=true python simple_client.py --log-level DEBUG
-```
-
-### Issue: vLLM fails to load adapter
-
-**Symptoms**: `[GPU-0] Error from Proxy: 400 - Invalid LoRA adapter`
-
-**Checks**:
-1. Verify adapter directory contains `adapter_config.json` and `adapter_model.safetensors`
-2. Check vLLM logs for detailed error messages
-3. Verify `--enable-lora` flag is set on vLLM servers
-
-**Solution**:
-```bash
-# Check adapter files
-ls serving/DisTrainer/models/latest_adapter/
-# Should show: adapter_config.json, adapter_model.safetensors, ...
-```
-
-### Issue: GPU out of memory
-
-**Symptoms**: vLLM crashes with OOM error
-
-**Cause**: Too many adapters in GPU memory
-
-**Solution**:
-1. Reduce `--max-loras` from 3 to 2 or 1
-2. Reduce `--gpu-memory-utilization` to leave more headroom
-3. Use smaller LoRA rank (r=4 instead of r=8)
-
-### Issue: Stale policy after restart
-
-**Symptoms**: DisGenerator loads old policy after restart
-
-**Cause**: `latest_adapter` symlink not updated
-
-**Solution**:
-```bash
-# Manually update symlink (from DisTrainer/models/)
-cd serving/DisTrainer/models
-ln -snf policy-1-20260120_143022 latest_adapter
-```
-
-## Advanced Configuration
-
-### Custom Policy Naming
-
-To use a different naming convention or models directory:
-
-```python
-policy_manager = PolicyManager(
-    models_dir="/custom/path/to/models",
-    lora_name="my-custom-adapter",
-    poll_interval=2.0
-)
-```
-
-**Note**: Ensure vLLM `--lora-modules` matches the `lora_name`.
-
-### Multiple Adapters
-
-For serving multiple adapters simultaneously (e.g., different policies for A/B testing):
-
-```python
-# Create separate PolicyManagers
-policy_manager_a = PolicyManager(models_dir=".../models_a", lora_name="policy-a")
-policy_manager_b = PolicyManager(models_dir=".../models_b", lora_name="policy-b")
-
-# Use different LoRARequests in different requests
-if experiment == "A":
-    lora_request = policy_manager_a.get_current_lora_request()
-else:
-    lora_request = policy_manager_b.get_current_lora_request()
-```
+### GPU out of memory after several swaps
+- Old versions are unloaded automatically (current + previous stay loaded).
+  If you raised `PolicyManager.KEEP_LOADED`, raise `--max-loras` to match.
 
 ## References
 
-- [vLLM LoRA Documentation](https://docs.vllm.ai/en/latest/models/lora.html)
-- [PEFT Library](https://github.com/huggingface/peft)
-- [AsyncRL Architecture](../README.md)
-
-## Summary
-
-The hot-swap LoRA feature enables **zero-downtime policy updates** for continuous RL training:
-
-✅ **Automatic detection**: PolicyManager watches for new policies
-✅ **Zero-downtime**: Old requests complete, new requests use new policy
-✅ **Simple integration**: Just set `ENABLE_HOTSWAP=true`
-✅ **Robust**: Thread-safe, error-handled, well-tested
-✅ **Configurable**: Adjust polling, memory limits, naming
-
-This unlocks truly continuous RL training where the system never stops generating rollouts, even as policies improve.
+- [vLLM LoRA adapters (dynamic loading)](https://docs.vllm.ai/en/latest/features/lora/)
+- [AsyncRL architecture](../README.md)

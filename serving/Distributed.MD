@@ -21,7 +21,7 @@ AsyncRL implements an **asynchronous distributed reinforcement learning** system
 │   │      ↓                 ↓         │        │         Training                 │       │
 │   │  ┌────────┐     ┌────────┐       │        │                                  │       │
 │   │  │ vLLM   │────▶│ vLLM   │       │        │  ┌─────────┐    ┌─────────┐      │       │
-│   │  │Prefill │NCCL │Decode  │       │        │  │ GPU 2   │    │ GPU 3   │      │       │
+│   │  │Prefill │NIXL │Decode  │       │        │  │ GPU 2   │    │ GPU 3   │      │       │
 │   │  └────────┘     └────────┘       │        │  │ (Shard) │    │ (Shard) │      │       │
 │   │       │              │           │        │  └────┬────┘    └────┬────┘      │       │
 │   │       └──────────────┘           │        │       └──────┬───────┘           │       │
@@ -77,7 +77,7 @@ serving/
 │   ├── batch_orchestrator.py       # Main orchestrator with tool handling
 │   ├── config.py                   # Config with get_latest_policy_path()
 │   ├── data_processing.py          # JSONL record building
-│   ├── disagg_proxy.py             # P2P NCCL proxy server
+│   ├── disagg_proxy.py             # NIXL two-phase proxy server
 │   ├── reward_functions.py         # Reward computation
 │   ├── simple_client.py            # Client to run the orchestrator
 │   ├── prompts.jsonl               # Input prompts
@@ -137,9 +137,38 @@ prompts.jsonl
 └─────────────────────────────────────────────────────────┘
 ```
 
-#### Batch File Sizing
+#### BufferQueue Transport (Queue Mode — Default)
 
-Batch files are created based on **complete GRPO groups** (prompts with all completions):
+The generator and trainer run as separate processes, so completed groups move
+between them over HTTP rather than a shared in-memory object:
+
+1. DisGenerator's orchestrator assembles a complete GRPO group (all N completions).
+2. `RemoteBufferQueue` (`serving/buffer_queue.py`) POSTs it to the trainer's
+   `POST /push_group` endpoint (port 8000, rank 0).
+3. Rank 0 holds the actual in-memory `BufferQueue` (bounded deque,
+   `data.buffer_maxlen`, default 32). When full, the **oldest** group is evicted
+   so the freshest, most on-policy data wins.
+4. Each training step, rank 0 pulls up to `num_generations_per_prompt` groups
+   and **broadcasts the batch to all ranks** (`dist.broadcast_object_list`).
+5. If the trainer is down, each push retries 5× (2s apart) and then drops the
+   group with an error log — stale rollouts aren't worth training on anyway.
+
+Configuration:
+
+| Setting | Where | Default | Description |
+|---------|-------|---------|-------------|
+| `ENABLE_BUFFER_QUEUE` | generator env | `true` | Push groups over HTTP instead of writing files |
+| `TRAINER_URL` | generator env | `http://localhost:8000` | Trainer control server |
+| `data.use_buffer_queue` | `train_config.toml` | `true` | Consume from BufferQueue instead of files |
+| `data.buffer_maxlen` | `train_config.toml` | `32` | Queue capacity (oldest evicted when full) |
+
+**Keep both sides in the same mode**: `ENABLE_BUFFER_QUEUE=false` on the
+generator must be paired with `use_buffer_queue = false` on the trainer,
+otherwise one side writes files the other never reads.
+
+#### Batch File Sizing (File Mode — Legacy)
+
+When queue mode is disabled, batch files are created based on **complete GRPO groups** (prompts with all completions):
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -502,6 +531,7 @@ torchrun --nproc_per_node=4 -m DisTrainer.train --config config/train_config.tom
 | `/train` | POST | Trigger training steps |
 | `/checkpoint` | POST | Save checkpoint |
 | `/load_checkpoint` | POST | Load checkpoint |
+| `/push_group` | POST | Receive a completed GRPO group from DisGenerator (queue mode) |
 
 **Example - Trigger Training:**
 ```bash
@@ -520,7 +550,23 @@ curl http://localhost:8000/status
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Proxy health + instance counts |
+| `/servers` | GET | Prefill/decode vLLM server URLs (used by PolicyManager for LoRA push) |
 | `/v1/chat/completions` | POST | OpenAI-compatible chat API |
+
+**KV transfer (NIXL):** the proxy implements vLLM's NixlConnector two-phase
+flow. Each request is first sent to a prefill instance (`max_tokens=1`,
+`kv_transfer_params: {do_remote_decode: true}`); the prefill response returns
+the remote engine/block/host/port handshake, which the proxy attaches to the
+decode request. The decode instance pulls the KV cache directly from the
+prefill instance over NIXL (RDMA/UCX) — no ZMQ discovery, no NCCL staging
+buffers. Each vLLM instance needs a unique `VLLM_NIXL_SIDE_CHANNEL_PORT`
+(the start scripts derive it from the old KV port arguments) and the `nixl`
+package installed (declared in `serving/pyproject.toml`).
+
+**LoRA hot-swap:** policy updates are pushed to every vLLM server via
+`POST /v1/load_lora_adapter` under versioned names (`grpo-adapter-vN`), and
+requests select the adapter via their `model` field. See
+`docs/HOTSWAP_LORA.md` for the full lifecycle.
 
 ---
 
@@ -553,6 +599,45 @@ save_dir = "./models"  # Where policies are saved
 save_interval = 10
 keep_latest_k = 3
 ```
+
+---
+
+## MoE Training (Qwen3-30B-A3B)
+
+`config/train_config_moe.toml` targets **Qwen/Qwen3-30B-A3B-Thinking-2507**
+(30.5B total / ~3.3B active, 128 experts, 8 active per token). Same tokenizer,
+chat template, and `<think>` format as the dense Qwen3-4B base, so prompts and
+reward parsing are unchanged.
+
+**Expert-layer LoRA**: vLLM >= 0.15 serves LoRA adapters on MoE expert layers
+(`fused_moe_lora` kernel), so the old attention-only restriction is lifted.
+The MoE config trains LoRA on attention + expert projections
+(`q/k/v/o_proj` + `gate/up/down_proj`) with `freeze_experts = false`.
+If your generator is pinned to an older vLLM, set `freeze_experts = true`
+to fall back to attention-only adapters.
+
+Run it:
+
+```bash
+# Generator: point the vLLM servers at the MoE base model
+export MODEL="Qwen/Qwen3-30B-A3B-Thinking-2507"
+cd serving/DisGenerator && ./scripts/start_all.sh 1p1d
+
+# Client: use the matching tokenizer
+TOKENIZER="Qwen/Qwen3-30B-A3B-Thinking-2507" uv run python simple_client.py
+
+# Trainer: use the MoE config
+torchrun --nproc_per_node=4 -m DisTrainer.train --config config/train_config_moe.toml
+```
+
+Notes:
+- **Bootstrap**: there is no MoE `policy-0-initial` yet. Start the trainer with
+  `--use-base-model` to create a fresh LoRA, save an initial checkpoint, and
+  let the generator pick it up via `latest_adapter`. (The old Qwen3-4B
+  `policy-0-initial` adapter is NOT loadable against the 30B base.)
+- **Adapter size**: expert LoRA at r=8 is ~400M adapter params (~800MB bf16);
+  with `--max-loras 3` budget ~2.5GB of GPU memory for adapters.
+- The router (`mlp.gate`) is never LoRA-targeted — it stays frozen.
 
 ---
 
