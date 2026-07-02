@@ -1,9 +1,12 @@
 """
 Layer freezing utilities for selective training.
 
-Used primarily for MoE models where expert/MLP layers need to be frozen
-because the inference generator (vLLM/sglang) doesn't support LoRA adapters
-on expert layers yet.
+Used primarily for MoE models to restrict training to attention layers.
+With LoRA models, PEFT already freezes all base weights, so the effective
+result of freeze_moe_experts() is freezing the expert-side LoRA params —
+i.e. attention-only adapters. This is only needed when the generator's vLLM
+is < 0.15 and cannot serve expert-layer adapters (fused_moe_lora kernel);
+with newer vLLM, skip freezing and train expert LoRA directly.
 """
 
 import torch.nn as nn
@@ -18,9 +21,11 @@ def freeze_moe_experts(
     """
     Freeze all expert/MLP layers in an MoE model.
 
-    This sets requires_grad=False for all parameters matching expert patterns.
-    Used when the inference generator (vLLM/sglang) doesn't support LoRA
-    adapters on expert layers.
+    This sets requires_grad=False for all parameters matching expert patterns —
+    including LoRA params attached to expert modules, which is how attention-only
+    training is enforced on a PEFT model whose target_modules include expert
+    projections. Only needed when the generator's vLLM (< 0.15) cannot serve
+    expert-layer adapters.
 
     Args:
         model: The MoE model

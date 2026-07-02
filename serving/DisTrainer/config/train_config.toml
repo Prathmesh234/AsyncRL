@@ -37,10 +37,15 @@ pp = 1   # No pipeline parallelism
 backend = "nccl"
 
 # Data Configuration
-# This is where DisGenerator writes batch files
+# Queue mode (default): DisGenerator pushes completed groups to POST /push_group
+# and they are held in an in-memory BufferQueue on rank 0 (no disk I/O).
+# File mode (use_buffer_queue = false): DisGenerator writes batch_*.jsonl files
+# into generations_dir instead.
 [data]
 generations_dir = "./data/generations"
 max_sequence_length = 8192
+use_buffer_queue = true
+buffer_maxlen = 32
 
 # Checkpoint Configuration
 # Policies are saved as: policy-{N}-{YYYYMMDD_HHMMSS}
