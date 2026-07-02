@@ -32,8 +32,10 @@ from reward_functions import compute_reward
 # PolicyManager for hot-swapping LoRA adapters
 from policy_manager import PolicyManager
 
-# BufferQueue: in-memory async deque shared with the trainer
-from buffer_queue import BufferQueue
+# BufferQueue transport: in-process deque, or HTTP push to the trainer's queue.
+# The orchestrator only needs the producer API: `await put(item)` and `stats()`.
+from typing import Union
+from buffer_queue import BufferQueue, RemoteBufferQueue
 
 # Tokenizer for proper token ID extraction
 from transformers import AutoTokenizer
@@ -72,7 +74,7 @@ class AsyncBatchOrchestrator:
         generation_temperature: float = 1.0,
         enabled_tools: Optional[Iterable[str]] = None,
         policy_manager: Optional[PolicyManager] = None,
-        buffer_queue: Optional[BufferQueue] = None,
+        buffer_queue: Optional[Union[BufferQueue, RemoteBufferQueue]] = None,
     ):
         self.proxy_url = proxy_url
         self.model = model  # Can be base model or LoRA adapter name
@@ -366,9 +368,17 @@ class AsyncBatchOrchestrator:
                     
                     logger.debug(f"[GPU-{worker_id}] Input: {input_tokens} tokens, max_tokens: {max_tokens}")
 
+                    # vLLM selects the LoRA adapter via the `model` field.
+                    # With hot-swap, PolicyManager returns the currently
+                    # active versioned adapter name (e.g. grpo-adapter-v3).
+                    model_name = self.model
+                    if self.policy_manager is not None:
+                        model_name = self.policy_manager.get_current_model_name() or self.model
+                        logger.debug(f"[GPU-{worker_id}] Using adapter: {model_name}")
+
                     # Prepare request payload
                     payload = {
-                        "model": self.model,  # Use configured model (base or LoRA adapter name)
+                        "model": model_name,
                         "messages": traj.messages,
                         "max_tokens": max_tokens,
                         "temperature": self.generation_temperature,  # GRPO: Use higher temp (1.0) for diverse completions
@@ -376,18 +386,6 @@ class AsyncBatchOrchestrator:
                         "logprobs": 1, # Request logprobs
                         "stop": self.stop_tokens
                     }
-
-                    # Add LoRA request if PolicyManager is configured (hot-swap support)
-                    if self.policy_manager is not None:
-                        lora_request = self.policy_manager.get_current_lora_request()
-                        if lora_request is not None:
-                            # vLLM uses extra_body for LoRA requests
-                            payload["extra_body"] = {
-                                "lora_request": lora_request.to_dict()
-                            }
-                            logger.debug(
-                                f"[GPU-{worker_id}] Using LoRA: lora_int_id={lora_request.lora_int_id}"
-                            )
 
                     buffer = ""
                     # Reset logprob accumulator for this turn (NOT completions - those accumulate)

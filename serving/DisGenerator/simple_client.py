@@ -19,13 +19,15 @@ import uuid
 import time
 from typing import List, Iterable
 
-# Add parent directory to path to locate batch_orchestrator
+# Add this directory and the serving root to the path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from batch_orchestrator import AsyncBatchOrchestrator, Trajectory
 from policy_manager import PolicyManager
 from config import DISTRAINER_MODELS_DIR
 from parser import TOOL_TAGS
+from buffer_queue import RemoteBufferQueue
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -50,6 +52,15 @@ GENERATION_TEMPERATURE = float(os.getenv("GENERATION_TEMPERATURE", "0.9"))
 # Hot-swap LoRA Policy Configuration
 ENABLE_HOTSWAP = os.getenv("ENABLE_HOTSWAP", "true").lower() in ("true", "1", "yes")
 POLICY_POLL_INTERVAL = float(os.getenv("POLICY_POLL_INTERVAL", "5.0"))  # Seconds between policy checks
+# vLLM server base URLs for pushing LoRA adapters (comma-separated). When
+# unset, they are discovered from the proxy's /servers endpoint.
+VLLM_SERVER_URLS = os.getenv("VLLM_SERVER_URLS", "")
+
+# BufferQueue transport: push completed groups to the trainer's in-memory
+# queue over HTTP instead of writing batch_*.jsonl files to disk.
+# Must match the trainer's data.use_buffer_queue TOML setting.
+ENABLE_BUFFER_QUEUE = os.getenv("ENABLE_BUFFER_QUEUE", "true").lower() in ("true", "1", "yes")
+TRAINER_URL = os.getenv("TRAINER_URL", "http://localhost:8000")
 
 # System prompt from .env (matches ToolGRPOTrainer)
 SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "")
@@ -57,6 +68,32 @@ SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "")
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [Client] %(message)s')
 logger = logging.getLogger("Client")
+
+def resolve_vllm_server_urls() -> List[str]:
+    """
+    Resolve the base URLs of every vLLM server (prefill + decode) so the
+    PolicyManager can push LoRA adapters to all of them.
+
+    Order: VLLM_SERVER_URLS env var, then the proxy's /servers endpoint,
+    then the 1P1D default ports.
+    """
+    if VLLM_SERVER_URLS.strip():
+        return [u.strip() for u in VLLM_SERVER_URLS.split(",") if u.strip()]
+
+    proxy_base = PROXY_URL.split("/v1/")[0]
+    try:
+        import urllib.request
+        with urllib.request.urlopen(f"{proxy_base}/servers", timeout=10) as resp:
+            data = json.loads(resp.read())
+            urls = data.get("all", [])
+            if urls:
+                return urls
+    except Exception as e:
+        logger.warning(f"Could not discover vLLM servers from proxy: {e}")
+
+    logger.warning("Falling back to default 1P1D vLLM server ports (20001, 20002)")
+    return ["http://localhost:20001", "http://localhost:20002"]
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="DisGenerator Orchestrator Client")
@@ -203,17 +240,39 @@ async def main():
     if ENABLE_HOTSWAP:
         print(f"  Poll Interval : {POLICY_POLL_INTERVAL}s")
         print(f"  Models Dir    : {DISTRAINER_MODELS_DIR}")
+    print(f"  ─────────────────────────────")
+    print(f"  Data Transport:")
+    if ENABLE_BUFFER_QUEUE:
+        print(f"  Mode          : BufferQueue (HTTP push to {TRAINER_URL})")
+    else:
+        print(f"  Mode          : File (batch_*.jsonl in {OUTPUT_DIR})")
     print(f"{'='*60}\n")
+
+    # 0. Initialize BufferQueue transport (queue mode)
+    buffer_queue = None
+    if ENABLE_BUFFER_QUEUE:
+        buffer_queue = RemoteBufferQueue(trainer_url=TRAINER_URL)
+        if await buffer_queue.check_health():
+            logger.info(f"Connected to DisTrainer BufferQueue at {TRAINER_URL}")
+        else:
+            logger.warning(
+                f"DisTrainer not reachable at {TRAINER_URL}. Pushes will be "
+                f"retried per-group and dropped if it stays down — start "
+                f"DisTrainer, or set ENABLE_BUFFER_QUEUE=false for file mode."
+            )
 
     # 1. Initialize PolicyManager for hot-swapping LoRA adapters
     policy_manager = None
     if ENABLE_HOTSWAP:
         logger.info("Initializing PolicyManager for hot-swap LoRA support...")
+        server_urls = resolve_vllm_server_urls()
+        logger.info(f"vLLM servers for adapter push: {server_urls}")
         policy_manager = PolicyManager(
             models_dir=DISTRAINER_MODELS_DIR,
-            lora_name="grpo-adapter",
+            lora_name=MODEL,  # Base adapter name registered via --lora-modules
             poll_interval=POLICY_POLL_INTERVAL,
-            enable_hotswap=True
+            enable_hotswap=True,
+            server_urls=server_urls,
         )
         policy_manager.start_watching()
         initial_policy = policy_manager.get_current_policy_info()
@@ -232,6 +291,7 @@ async def main():
         generation_temperature=GENERATION_TEMPERATURE,
         enabled_tools=enabled_tools,
         policy_manager=policy_manager,
+        buffer_queue=buffer_queue,
     )
 
     # 3. Start workers
@@ -247,6 +307,8 @@ async def main():
         await orchestrator.stop()
         if policy_manager is not None:
             policy_manager.stop_watching()
+        if buffer_queue is not None:
+            await buffer_queue.close()
 
 
 if __name__ == "__main__":

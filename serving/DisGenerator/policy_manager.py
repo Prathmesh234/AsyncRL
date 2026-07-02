@@ -1,48 +1,38 @@
 """
 PolicyManager for hot-swapping LoRA policies in vLLM.
 
-Enables zero-downtime policy updates by loading new LoRA adapters via
-LoRARequest with unique lora_int_id values. vLLM maintains multiple
-adapters in GPU memory with automatic LRU eviction.
+Enables zero-downtime policy updates using vLLM's dynamic LoRA endpoints
+(requires VLLM_ALLOW_RUNTIME_LORA_UPDATING=True on the servers):
 
-Architecture:
-- DisTrainer saves new policies to models/policy-N-timestamp/
-- DisTrainer updates latest_adapter symlink and writes .policy_ready signal
-- PolicyManager watches for new policies and creates new LoRARequest objects
-- Batch orchestrator uses current LoRARequest for all new vLLM requests
-- Old in-flight requests complete with previous policy automatically
+  POST /v1/load_lora_adapter    {"lora_name": ..., "lora_path": ...}
+  POST /v1/unload_lora_adapter  {"lora_name": ...}
+
+Per-request adapter selection in vLLM's OpenAI-compatible server is done via
+the `model` field of the request — there is NO per-request lora_request
+parameter. So the flow is:
+
+- The vLLM servers register the initial adapter as `<lora_name>` at startup
+  (--lora-modules "<lora_name>=<path to latest_adapter>").
+- DisTrainer saves new policies to models/policy-N-timestamp/, retargets the
+  latest_adapter symlink, and writes a .policy_ready signal.
+- PolicyManager polls for changes. On a new policy it loads the adapter on
+  EVERY vLLM server (prefill + decode — both phases of the disaggregated
+  proxy must know the name) under a fresh versioned name `<lora_name>-vN`.
+- Only after all servers accept the adapter does the current model name
+  switch; the orchestrator stamps it into each request's `model` field.
+- In-flight requests keep using the previous name (still loaded); the
+  version before that is unloaded to bound GPU/CPU adapter memory.
 """
 
-import os
+import json
 import logging
 import threading
-import time
+import urllib.error
+import urllib.request
 from pathlib import Path
-from typing import Optional
-from dataclasses import dataclass
+from typing import List, Optional
 
 logger = logging.getLogger("PolicyManager")
-
-
-@dataclass
-class LoRARequest:
-    """
-    LoRA request configuration for vLLM.
-
-    vLLM uses this to identify and load specific LoRA adapters.
-    Each adapter needs a unique lora_int_id.
-    """
-    lora_name: str  # Identifier for this adapter (e.g., "grpo-adapter")
-    lora_int_id: int  # Unique integer ID for this adapter version
-    lora_path: str  # Path to the adapter directory
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary for vLLM API."""
-        return {
-            "lora_name": self.lora_name,
-            "lora_int_id": self.lora_int_id,
-            "lora_path": self.lora_path
-        }
 
 
 class PolicyManager:
@@ -50,47 +40,83 @@ class PolicyManager:
     Manages hot-swapping of LoRA policies for DisGenerator.
 
     Responsibilities:
-    - Track current policy version and corresponding LoRARequest
+    - Track the current policy version and its vLLM adapter name
     - Watch for new policies from DisTrainer
-    - Provide thread-safe access to current LoRARequest
-    - Automatically increment lora_int_id for new policies
+    - Push new adapters to every vLLM server via /v1/load_lora_adapter
+    - Retire old adapters via /v1/unload_lora_adapter (keeps current + previous)
+    - Provide thread-safe access to the current adapter name for requests
     """
+
+    # How many adapter versions stay loaded on the servers. 2 = current +
+    # previous, so in-flight requests on the old name finish cleanly.
+    # Keep this <= the servers' --max-loras setting.
+    KEEP_LOADED = 2
 
     def __init__(
         self,
         models_dir: str,
         lora_name: str = "grpo-adapter",
         poll_interval: float = 5.0,
-        enable_hotswap: bool = True
+        enable_hotswap: bool = True,
+        server_urls: Optional[List[str]] = None,
+        request_timeout: float = 60.0,
     ):
         """
         Initialize PolicyManager.
 
         Args:
             models_dir: Path to DisTrainer/models directory
-            lora_name: Name identifier for the LoRA adapter
+            lora_name: Base adapter name; must match the name registered via
+                       --lora-modules on the vLLM servers
             poll_interval: Seconds between policy checks
-            enable_hotswap: If False, policy is loaded once at startup
+            enable_hotswap: If False, the startup adapter is used forever
+            server_urls: Base URLs of ALL vLLM servers (prefill + decode),
+                         e.g. ["http://localhost:20001", "http://localhost:20002"]
+            request_timeout: Timeout for load/unload HTTP calls (adapter
+                             loading from disk can take a few seconds)
         """
         self.models_dir = Path(models_dir)
         self.lora_name = lora_name
         self.poll_interval = poll_interval
         self.enable_hotswap = enable_hotswap
+        self.server_urls = [u.rstrip("/") for u in (server_urls or [])]
+        self.request_timeout = request_timeout
+
+        if self.enable_hotswap and not self.server_urls:
+            logger.warning(
+                "Hot-swap enabled but no vLLM server URLs configured — "
+                "new policies CANNOT be pushed to the servers. Set "
+                "VLLM_SERVER_URLS or let the client discover them from the proxy."
+            )
 
         # Thread safety
         self._lock = threading.Lock()
 
-        # Current policy state
+        # Current policy state. Version 0 is the adapter the servers
+        # registered at startup under the base lora_name.
+        self._version = 0
+        self._current_model_name: str = lora_name
         self._current_policy_path: Optional[str] = None
-        self._current_lora_request: Optional[LoRARequest] = None
-        self._lora_int_id_counter = 1  # Start from 1 (0 reserved for no adapter)
 
         # Watcher thread
         self._watcher_thread: Optional[threading.Thread] = None
         self._stop_watching = threading.Event()
 
-        # Initialize with current policy
-        self._detect_and_load_policy(initial=True)
+        # Record the policy the servers started with (no HTTP needed:
+        # start scripts resolve the same latest_adapter symlink).
+        initial_path = self._get_latest_policy_path()
+        if initial_path is None:
+            logger.warning("No policy found at startup. Requests will use the base model name.")
+        else:
+            self._current_policy_path = initial_path
+            logger.info(
+                f"📥 Initial policy: model_name={self._current_model_name}, "
+                f"path={Path(initial_path).name} (registered at server startup)"
+            )
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     def start_watching(self):
         """Start the policy watcher thread."""
@@ -121,102 +147,142 @@ class PolicyManager:
         self._watcher_thread.join(timeout=10)
         logger.info("Policy watcher stopped")
 
-    def get_current_lora_request(self) -> Optional[LoRARequest]:
+    def get_current_model_name(self) -> str:
         """
-        Get the current LoRARequest for use in vLLM requests.
+        Adapter name to put in the `model` field of vLLM requests.
 
-        Thread-safe. Returns None if no policy is loaded.
+        Thread-safe. Returns the base lora_name until the first hot-swap.
         """
         with self._lock:
-            return self._current_lora_request
+            return self._current_model_name
 
     def get_current_policy_info(self) -> dict:
         """Get current policy information (for logging/debugging)."""
         with self._lock:
-            if self._current_lora_request is None:
-                return {"status": "no_policy", "lora_int_id": None, "path": None}
             return {
-                "status": "active",
-                "lora_name": self._current_lora_request.lora_name,
-                "lora_int_id": self._current_lora_request.lora_int_id,
-                "path": self._current_lora_request.lora_path
+                "status": "active" if self._current_policy_path else "no_policy",
+                "model_name": self._current_model_name,
+                "version": self._version,
+                "path": self._current_policy_path,
+                "servers": list(self.server_urls),
             }
 
-    def _policy_watcher(self):
-        """
-        Background thread that watches for new policies.
+    # ------------------------------------------------------------------
+    # Watcher internals
+    # ------------------------------------------------------------------
 
-        Checks for:
-        1. Changes to latest_adapter symlink
-        2. .policy_ready signal file from DisTrainer
-        """
+    def _policy_watcher(self):
+        """Background thread that polls for new policies and swaps them in."""
         logger.info("Policy watcher started")
 
         while not self._stop_watching.is_set():
             try:
-                # Check for policy updates
-                self._detect_and_load_policy(initial=False)
-
-                # Sleep with interrupt support
-                self._stop_watching.wait(timeout=self.poll_interval)
-
+                self._detect_and_swap_policy()
             except Exception as e:
                 logger.error(f"Error in policy watcher: {e}", exc_info=True)
-                # Continue watching despite errors
-                time.sleep(self.poll_interval)
+            # Sleep with interrupt support
+            self._stop_watching.wait(timeout=self.poll_interval)
 
-    def _detect_and_load_policy(self, initial: bool = False):
+    def _detect_and_swap_policy(self):
         """
-        Detect if a new policy is available and load it.
-
-        Args:
-            initial: True if this is the first load at startup
+        Check for a new policy; if found, push it to all vLLM servers and
+        switch the current model name only after every server accepted it.
+        A failed push leaves state unchanged so the next poll retries.
         """
-        # Get latest policy path
         latest_path = self._get_latest_policy_path()
-
         if latest_path is None:
-            if initial:
-                logger.warning("No policy found at startup. Will continue without LoRA adapter.")
             return
 
-        # Check if policy has changed
         with self._lock:
             if latest_path == self._current_policy_path:
-                # No change
-                return
+                return  # No change
+            old_name = self._current_model_name
+            new_version = self._version + 1
+        new_name = f"{self.lora_name}-v{new_version}"
 
-            # New policy detected!
-            old_path = self._current_policy_path
-            old_lora_id = self._current_lora_request.lora_int_id if self._current_lora_request else None
-
-            # Create new LoRARequest with incremented ID
-            new_lora_request = LoRARequest(
-                lora_name=self.lora_name,
-                lora_int_id=self._lora_int_id_counter,
-                lora_path=latest_path
+        if not self.server_urls:
+            logger.error(
+                f"New policy detected ({Path(latest_path).name}) but no server "
+                f"URLs configured — cannot hot-swap. Still serving {old_name}."
             )
+            return
 
-            # Update state
+        # Load the new adapter on every server (outside the lock: this is
+        # slow I/O, and readers must keep getting the old name meanwhile).
+        if not self._load_adapter_everywhere(new_name, latest_path):
+            logger.error(
+                f"Hot-swap aborted: {new_name} failed to load on at least one "
+                f"server. Still serving {old_name}; will retry in {self.poll_interval}s."
+            )
+            return
+
+        with self._lock:
+            self._version = new_version
+            self._current_model_name = new_name
             self._current_policy_path = latest_path
-            self._current_lora_request = new_lora_request
-            self._lora_int_id_counter += 1
 
-            # Log the hot-swap
-            if initial:
-                logger.info(
-                    f"📥 Initial policy loaded: lora_int_id={new_lora_request.lora_int_id}, "
-                    f"path={Path(latest_path).name}"
-                )
-            else:
-                logger.info(
-                    f"🔄 HOT-SWAP: Policy updated! "
-                    f"Old: lora_int_id={old_lora_id}, New: lora_int_id={new_lora_request.lora_int_id}, "
-                    f"path={Path(latest_path).name}"
-                )
+        logger.info(
+            f"🔄 HOT-SWAP: {old_name} → {new_name} "
+            f"(path={Path(latest_path).name}) on {len(self.server_urls)} servers"
+        )
 
-        # Check and consume .policy_ready signal if it exists
         self._consume_policy_ready_signal()
+
+        # Retire the version before the previous one (keep current + previous
+        # loaded for in-flight requests).
+        retired = new_version - self.KEEP_LOADED
+        if retired >= 0:
+            retired_name = self.lora_name if retired == 0 else f"{self.lora_name}-v{retired}"
+            self._unload_adapter_everywhere(retired_name)
+
+    # ------------------------------------------------------------------
+    # vLLM dynamic LoRA HTTP calls
+    # ------------------------------------------------------------------
+
+    def _load_adapter_everywhere(self, name: str, path: str) -> bool:
+        """POST /v1/load_lora_adapter on every server. True if all succeeded."""
+        ok = True
+        for base in self.server_urls:
+            if not self._post_json(
+                f"{base}/v1/load_lora_adapter",
+                {"lora_name": name, "lora_path": path},
+            ):
+                ok = False
+            else:
+                logger.info(f"Loaded {name} on {base}")
+        return ok
+
+    def _unload_adapter_everywhere(self, name: str):
+        """POST /v1/unload_lora_adapter on every server (best effort)."""
+        for base in self.server_urls:
+            if self._post_json(
+                f"{base}/v1/unload_lora_adapter",
+                {"lora_name": name},
+            ):
+                logger.info(f"Unloaded {name} on {base}")
+            else:
+                logger.warning(f"Failed to unload {name} on {base} (non-fatal)")
+
+    def _post_json(self, url: str, payload: dict) -> bool:
+        """POST a JSON payload; True on 2xx."""
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=data, headers={"Content-Type": "application/json"}, method="POST"
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.request_timeout) as resp:
+                return 200 <= resp.status < 300
+        except urllib.error.HTTPError as e:
+            body = e.read()[:300]
+            logger.error(f"{url} -> HTTP {e.code}: {body!r}")
+            return False
+        except Exception as e:
+            logger.error(f"{url} -> {e}")
+            return False
+
+    # ------------------------------------------------------------------
+    # Policy detection (unchanged from the original design)
+    # ------------------------------------------------------------------
 
     def _get_latest_policy_path(self) -> Optional[str]:
         """
