@@ -15,9 +15,13 @@ from typing import Optional, List, Dict, Any
 
 from .trainer import Trainer, Config
 from .mesh import is_main_rank
+from .components import BufferQueue
 
 # Global items
 trainer: Optional[Trainer] = None
+# In-memory queue fed by DisGenerator via POST /push_group (queue mode).
+# Lives in rank 0's process; batches are broadcast to other ranks in train_step.
+buffer_queue: Optional[BufferQueue] = None
 app = FastAPI(title="DisTrainer", description="Distributed GRPO Trainer API")
 
 # Command Queue Mechanism
@@ -57,6 +61,10 @@ class CheckpointResponse(BaseModel):
 
 class LoadCheckpointRequest(BaseModel):
     step: Optional[int] = None
+
+class PushGroupResponse(BaseModel):
+    added: bool
+    stats: Dict[str, Any]
 
 def get_trainer() -> Trainer:
     """Get the trainer instance, raise if not initialized."""
@@ -136,18 +144,47 @@ async def status():
         gpu_count=s["gpu_count"]
     )
 
+@app.post("/push_group", response_model=PushGroupResponse)
+async def push_group(group: Dict[str, Any]):
+    """
+    Receive a completed GRPO group from DisGenerator (queue mode).
+
+    The generator's RemoteBufferQueue POSTs each fully-assembled grouped
+    record here; it lands in the in-memory BufferQueue that the trainer's
+    DataLoader consumes.
+    """
+    if buffer_queue is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Trainer is in file mode (data.use_buffer_queue = false); "
+                   "write batch files to data/generations/ instead."
+        )
+    added = await buffer_queue.put(group)
+    return PushGroupResponse(added=added, stats=buffer_queue.stats())
+
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "trainer_ready": trainer is not None}
+    return {
+        "status": "healthy",
+        "trainer_ready": trainer is not None,
+        "buffer_queue": buffer_queue.stats() if buffer_queue is not None else None,
+    }
 
 
 # --- Core Logic ---
 
 def init_trainer(config_path: str, use_base_model: bool = False):
-    """Initialize the global trainer instance."""
-    global trainer
+    """Initialize the global trainer instance (and BufferQueue in queue mode)."""
+    global trainer, buffer_queue
     config = Config.from_toml(config_path)
-    trainer = Trainer(config, use_base_model=use_base_model)
+    if config.data.use_buffer_queue:
+        # Created on every rank for symmetry, but only rank 0's ever receives
+        # data (via its HTTP server); train_step broadcasts batches from rank 0.
+        buffer_queue = BufferQueue(maxlen=config.data.buffer_maxlen)
+    trainer = Trainer(config, use_base_model=use_base_model, buffer_queue=buffer_queue)
+    if is_main_rank():
+        mode = "QUEUE (POST /push_group)" if buffer_queue is not None else "FILE (data/generations/)"
+        print(f"Data ingestion mode: {mode}")
     return trainer
 
 def distributed_worker(trainer_instance: Trainer, auto_train: bool = True, poll_interval: float = 5.0):

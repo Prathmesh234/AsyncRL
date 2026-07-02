@@ -4,6 +4,7 @@ Orchestrates distributed GRPO training with FSDP2.
 """
 
 import torch
+import torch.distributed as dist
 import tomli
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -45,6 +46,10 @@ class TrainingConfig:
 class DataConfig:
     generations_dir: str = "./data/generations"
     max_sequence_length: int = 8192
+    # Queue mode: rank 0 holds an in-memory BufferQueue fed by the generator
+    # via POST /push_group. Set false to fall back to file-based batches.
+    use_buffer_queue: bool = True
+    buffer_maxlen: int = 32
 
 
 @dataclass
@@ -209,9 +214,10 @@ class Trainer:
                     print(f"  - Model Type: MoE (Mixture-of-Experts)")
                     print(f"  - Freeze Experts: {self.config.model.freeze_experts}")
                     if self.config.model.freeze_experts:
-                        print(f"  - Training: Attention layers only (experts frozen)")
+                        print(f"  - Training: Attention-only LoRA (expert LoRA frozen)")
                     else:
-                        print(f"  - Training: All layers including experts")
+                        print(f"  - Training: Attention + expert LoRA")
+                        print(f"    Serving requires vLLM >= 0.15 (fused_moe_lora) on DisGenerator")
         
         # Convert to bfloat16 for memory efficiency
         model = model.to(torch.bfloat16)
@@ -274,8 +280,18 @@ class Trainer:
         Returns:
             Dictionary with training metrics
         """
-        # Load next batch
-        batch = self.data_loader.get_next_batch()
+        # Load next batch on rank 0 and broadcast to all ranks.
+        # In queue mode only rank 0 receives data (the BufferQueue is fed by
+        # its HTTP server), so other ranks must get the batch via broadcast.
+        # All ranks reach this point in lockstep (distributed_worker broadcasts
+        # the TRAIN command), so the collective is safe.
+        batch = None
+        if is_main_rank():
+            batch = self.data_loader.get_next_batch()
+        if dist.is_initialized() and dist.get_world_size() > 1:
+            obj_list = [batch]
+            dist.broadcast_object_list(obj_list, src=0)
+            batch = obj_list[0]
         if batch is None:
             return {"status": "no_data", "step": self.step}
         

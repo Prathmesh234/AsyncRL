@@ -184,3 +184,123 @@ class BufferQueue:
             f"[{s['fill_pct']}%], put={s['total_put']}, "
             f"get={s['total_get']}, dropped={s['dropped']})"
         )
+
+
+class RemoteBufferQueue:
+    """
+    HTTP-backed producer-side stand-in for BufferQueue.
+
+    The generator and trainer run as separate processes (uv client vs.
+    torchrun), so the real in-memory BufferQueue lives inside the trainer's
+    rank-0 process, which exposes it via `POST /push_group` on its FastAPI
+    control server (port 8000). This client implements the same producer API
+    the orchestrator uses — `await put(item)`, `stats()` — and forwards each
+    completed group to the trainer.
+
+    Failure behavior: each put retries `max_retries` times with a fixed delay
+    (backpressure on the generator while the trainer restarts), then drops
+    the group with an error log. Dropping is acceptable here — by the time
+    the trainer is back, old rollouts are stale off-policy data anyway.
+    """
+
+    def __init__(
+        self,
+        trainer_url: str = "http://localhost:8000",
+        max_retries: int = 5,
+        retry_delay: float = 2.0,
+        request_timeout: float = 30.0,
+    ):
+        base = trainer_url.rstrip("/")
+        self.push_url = f"{base}/push_group"
+        self.health_url = f"{base}/health"
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
+        self.request_timeout = request_timeout
+
+        self._session = None  # aiohttp.ClientSession, created lazily
+        self._dropped = 0
+        # Mirror of the server-side queue stats, refreshed on every push.
+        # Keys match BufferQueue.stats() so orchestrator logging works as-is.
+        self._last_stats: Dict[str, Any] = {
+            "size": 0,
+            "maxlen": BufferQueue.DEFAULT_MAXLEN,
+            "fill_pct": 0.0,
+            "total_put": 0,
+            "total_get": 0,
+            "dropped": 0,
+        }
+
+        logger.info(f"[RemoteBufferQueue] Pushing groups to {self.push_url}")
+
+    async def _get_session(self):
+        import aiohttp
+
+        if self._session is None or self._session.closed:
+            timeout = aiohttp.ClientTimeout(total=self.request_timeout)
+            self._session = aiohttp.ClientSession(timeout=timeout)
+        return self._session
+
+    async def check_health(self) -> bool:
+        """Return True if the trainer's control server is reachable."""
+        try:
+            session = await self._get_session()
+            async with session.get(self.health_url) as resp:
+                return resp.status == 200
+        except Exception:
+            return False
+
+    async def put(self, item: Dict[str, Any]) -> bool:
+        """
+        Push a completed GRPO group to the trainer's BufferQueue.
+
+        Returns:
+            True  – accepted with no server-side eviction.
+            False – accepted but an older group was evicted, or the push
+                    failed after all retries (group dropped; check logs).
+        """
+        import asyncio
+
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                session = await self._get_session()
+                async with session.post(self.push_url, json=item) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        self._last_stats = data.get("stats", self._last_stats)
+                        return bool(data.get("added", True))
+                    body = await resp.text()
+                    logger.warning(
+                        "[RemoteBufferQueue] Push rejected (%d): %s",
+                        resp.status, body[:200],
+                    )
+            except Exception as e:
+                logger.warning(
+                    "[RemoteBufferQueue] Push attempt %d/%d failed: %s",
+                    attempt, self.max_retries, e,
+                )
+            if attempt < self.max_retries:
+                await asyncio.sleep(self.retry_delay)
+
+        self._dropped += 1
+        logger.error(
+            "[RemoteBufferQueue] Dropped group %r after %d attempts "
+            "(total dropped=%d). Is DisTrainer running?",
+            item.get("group_id"), self.max_retries, self._dropped,
+        )
+        return False
+
+    def stats(self) -> Dict[str, Any]:
+        """Last stats reported by the trainer, plus client-side drop count."""
+        return {**self._last_stats, "client_dropped": self._dropped}
+
+    async def close(self):
+        """Close the underlying HTTP session."""
+        if self._session is not None and not self._session.closed:
+            await self._session.close()
+
+    def __repr__(self) -> str:
+        s = self.stats()
+        return (
+            f"RemoteBufferQueue(size={s['size']}/{s['maxlen']}, "
+            f"client_dropped={s['client_dropped']}, url={self.push_url})"
+        )
