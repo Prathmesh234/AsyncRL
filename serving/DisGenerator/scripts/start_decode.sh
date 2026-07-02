@@ -2,14 +2,15 @@
 # =============================================================================
 # DisGenerator - Start Decode Server(s)
 # =============================================================================
-# This script starts vLLM decode server(s) configured as KV consumers.
-# Decode servers receive KV cache from prefill servers via NCCL and generate tokens.
+# This script starts vLLM decode server(s) using the NixlConnector.
+# Decode servers pull the KV cache directly from prefill servers via NIXL
+# (RDMA/UCX), driven by the proxy's kv_transfer_params handshake.
 #
 # Usage:
-#   ./start_decode.sh [GPU_ID] [HTTP_PORT] [KV_PORT] [--use-base-model]
+#   ./start_decode.sh [GPU_ID] [HTTP_PORT] [SIDE_CHANNEL_PORT] [--use-base-model]
 #
 # Examples:
-#   ./start_decode.sh              # Use defaults: GPU 1, port 20002, kv 22001
+#   ./start_decode.sh              # Use defaults: GPU 1, port 20002, side channel 22001
 #   ./start_decode.sh 1 20002 22001
 #   ./start_decode.sh 2 20004 22002
 #   ./start_decode.sh 1 20002 22001 --use-base-model  # Use base SFT adapter (checkpoint-2280)
@@ -20,7 +21,6 @@
 #
 # Environment Variables:
 #   MODEL             - Model to serve (default: Qwen/Qwen3-4B-Thinking-2507)
-#   PROXY_PORT        - Proxy ZMQ port (default: 30001)
 #   MAX_MODEL_LEN     - Max sequence length (default: 65536)
 #   DTYPE             - Data type (default: float16)
 # =============================================================================
@@ -39,15 +39,16 @@ mkdir -p logs
 # Parse arguments with defaults
 GPU_ID="${1:-1}"
 HTTP_PORT="${2:-20002}"
-KV_PORT="${3:-22001}"
+SIDE_CHANNEL_PORT="${3:-22001}"
 USE_BASE_MODEL="${4:-}"
 
 # Configuration from environment with defaults
 MODEL="${MODEL:-Qwen/Qwen3-4B-Thinking-2507}"
-PROXY_PORT="${PROXY_PORT:-30001}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-65536}"
 DTYPE="${DTYPE:-float16}"
-# Lower GPU memory utilization to leave room for incoming KV cache
+# NIXL writes pulled KV straight into the paged cache (no NCCL staging
+# buffer), but decode still hosts long-context KV + LoRA adapters — keep
+# headroom. Override via GPU_MEMORY_UTILIZATION if you have room to spare.
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.7}"
 
 # Models directory (relative to DisGenerator)
@@ -74,42 +75,31 @@ SERVER_ID="decode_gpu${GPU_ID}_port${HTTP_PORT}"
 LOG_FILE="logs/${SERVER_ID}.log"
 
 echo "=============================================="
-echo "Starting Decode Server (KV Consumer)"
+echo "Starting Decode Server (NIXL)"
 echo "=============================================="
-echo "  GPU:        $GPU_ID"
-echo "  HTTP Port:  $HTTP_PORT"
-echo "  KV Port:    $KV_PORT"
-echo "  Model:      $MODEL"
+echo "  GPU:          $GPU_ID"
+echo "  HTTP Port:    $HTTP_PORT"
+echo "  Side Channel: $SIDE_CHANNEL_PORT"
+echo "  Model:        $MODEL"
 if [ "$USE_BASE_MODEL" == "--use-base-model" ]; then
-    echo "  Mode:       BASE MODEL (SFT checkpoint-2280)"
+    echo "  Mode:         BASE MODEL (SFT checkpoint-2280)"
 else
-    echo "  Mode:       GRPO FINETUNED"
+    echo "  Mode:         GRPO FINETUNED"
 fi
-echo "  LoRA:       $LORA_MODULE_PATH"
-echo "  Proxy:      0.0.0.0:$PROXY_PORT"
-echo "  Log file:   $LOG_FILE"
+echo "  LoRA:         $LORA_MODULE_PATH"
+echo "  Log file:     $LOG_FILE"
 echo "=============================================="
 
-# Build KV transfer config JSON
-KV_CONFIG=$(cat <<EOF
-{
-  "kv_connector": "P2pNcclConnector",
-  "kv_role": "kv_consumer",
-  "kv_buffer_size": "8e9",
-  "kv_port": "$KV_PORT",
-  "kv_connector_extra_config": {
-    "proxy_ip": "0.0.0.0",
-    "proxy_port": "$PROXY_PORT",
-    "http_port": "$HTTP_PORT",
-    "send_type": "PUT_ASYNC",
-    "nccl_num_channels": "16"
-  }
-}
-EOF
-)
+# NixlConnector config: both roles are "kv_both"; the proxy's
+# kv_transfer_params handshake decides who produces and who consumes.
+KV_CONFIG_INLINE='{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
 
-# Convert to single line for command
-KV_CONFIG_INLINE=$(echo "$KV_CONFIG" | tr -d '\n' | tr -s ' ')
+# Each vLLM instance on the same host needs a unique NIXL side channel port.
+export VLLM_NIXL_SIDE_CHANNEL_PORT=$SIDE_CHANNEL_PORT
+
+# Enable /v1/load_lora_adapter + /v1/unload_lora_adapter so PolicyManager can
+# hot-swap new policies without restarting the server.
+export VLLM_ALLOW_RUNTIME_LORA_UPDATING=True
 
 # Start the server
 echo "Launching vLLM server..."

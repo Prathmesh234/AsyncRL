@@ -2,14 +2,16 @@
 # =============================================================================
 # DisGenerator - Start Prefill Server(s)
 # =============================================================================
-# This script starts vLLM prefill server(s) configured as KV producers.
-# Prefill servers process prompts and send KV cache to decode servers via NCCL.
+# This script starts vLLM prefill server(s) using the NixlConnector.
+# Prefill servers compute the KV cache; decode servers pull it directly via
+# NIXL (RDMA/UCX). Routing is handled by the proxy's kv_transfer_params
+# handshake — no ZMQ service discovery needed.
 #
 # Usage:
-#   ./start_prefill.sh [GPU_ID] [HTTP_PORT] [KV_PORT] [--use-base-model]
+#   ./start_prefill.sh [GPU_ID] [HTTP_PORT] [SIDE_CHANNEL_PORT] [--use-base-model]
 #
 # Examples:
-#   ./start_prefill.sh              # Use defaults: GPU 0, port 20001, kv 21001
+#   ./start_prefill.sh              # Use defaults: GPU 0, port 20001, side channel 21001
 #   ./start_prefill.sh 0 20001 21001
 #   ./start_prefill.sh 1 20003 21002
 #   ./start_prefill.sh 0 20001 21001 --use-base-model  # Use base SFT adapter (checkpoint-2280)
@@ -20,7 +22,6 @@
 #
 # Environment Variables:
 #   MODEL             - Model to serve (default: Qwen/Qwen3-4B-Thinking-2507)
-#   PROXY_PORT        - Proxy ZMQ port (default: 30001)
 #   MAX_MODEL_LEN     - Max sequence length (default: 65536)
 #   DTYPE             - Data type (default: float16)
 # =============================================================================
@@ -39,12 +40,11 @@ mkdir -p logs
 # Parse arguments with defaults
 GPU_ID="${1:-0}"
 HTTP_PORT="${2:-20001}"
-KV_PORT="${3:-21001}"
+SIDE_CHANNEL_PORT="${3:-21001}"
 USE_BASE_MODEL="${4:-}"
 
 # Configuration from environment with defaults
 MODEL="${MODEL:-Qwen/Qwen3-4B-Thinking-2507}"
-PROXY_PORT="${PROXY_PORT:-30001}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-65536}"
 DTYPE="${DTYPE:-float16}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.9}"
@@ -73,42 +73,31 @@ SERVER_ID="prefill_gpu${GPU_ID}_port${HTTP_PORT}"
 LOG_FILE="logs/${SERVER_ID}.log"
 
 echo "=============================================="
-echo "Starting Prefill Server (KV Producer)"
+echo "Starting Prefill Server (NIXL)"
 echo "=============================================="
-echo "  GPU:        $GPU_ID"
-echo "  HTTP Port:  $HTTP_PORT"
-echo "  KV Port:    $KV_PORT"
-echo "  Model:      $MODEL"
+echo "  GPU:          $GPU_ID"
+echo "  HTTP Port:    $HTTP_PORT"
+echo "  Side Channel: $SIDE_CHANNEL_PORT"
+echo "  Model:        $MODEL"
 if [ "$USE_BASE_MODEL" == "--use-base-model" ]; then
-    echo "  Mode:       BASE MODEL (SFT checkpoint-2280)"
+    echo "  Mode:         BASE MODEL (SFT checkpoint-2280)"
 else
-    echo "  Mode:       GRPO FINETUNED"
+    echo "  Mode:         GRPO FINETUNED"
 fi
-echo "  LoRA:       $LORA_MODULE_PATH"
-echo "  Proxy:      0.0.0.0:$PROXY_PORT"
-echo "  Log file:   $LOG_FILE"
+echo "  LoRA:         $LORA_MODULE_PATH"
+echo "  Log file:     $LOG_FILE"
 echo "=============================================="
 
-# Build KV transfer config JSON
-KV_CONFIG=$(cat <<EOF
-{
-  "kv_connector": "P2pNcclConnector",
-  "kv_role": "kv_producer",
-  "kv_buffer_size": "1e9",
-  "kv_port": "$KV_PORT",
-  "kv_connector_extra_config": {
-    "proxy_ip": "0.0.0.0",
-    "proxy_port": "$PROXY_PORT",
-    "http_port": "$HTTP_PORT",
-    "send_type": "PUT_ASYNC",
-    "nccl_num_channels": "16"
-  }
-}
-EOF
-)
+# NixlConnector config: both roles are "kv_both"; the proxy's
+# kv_transfer_params handshake decides who produces and who consumes.
+KV_CONFIG_INLINE='{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
 
-# Convert to single line for command
-KV_CONFIG_INLINE=$(echo "$KV_CONFIG" | tr -d '\n' | tr -s ' ')
+# Each vLLM instance on the same host needs a unique NIXL side channel port.
+export VLLM_NIXL_SIDE_CHANNEL_PORT=$SIDE_CHANNEL_PORT
+
+# Enable /v1/load_lora_adapter + /v1/unload_lora_adapter so PolicyManager can
+# hot-swap new policies without restarting the server.
+export VLLM_ALLOW_RUNTIME_LORA_UPDATING=True
 
 # Start the server
 echo "Launching vLLM server..."
