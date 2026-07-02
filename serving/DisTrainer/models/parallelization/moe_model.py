@@ -2,13 +2,15 @@
 FSDP2 parallelization for Mixture-of-Experts (MoE) models.
 
 Supports MoE architectures like:
+- Qwen3-MoE (e.g. Qwen3-30B-A3B)
 - Arcee Trinity (Mini, Large)
 - DeepSeek-V2, DeepSeek-V3
 - Mixtral
 - Qwen2-MoE
 
 Key features:
-- Optional expert layer freezing (for when generator doesn't support expert adapters)
+- Optional expert layer freezing (attention-only LoRA for generators pinned
+  to vLLM < 0.15, which cannot serve expert-layer adapters)
 - Expert Parallelism (EP) support (future enhancement)
 - Handles both routed experts and shared experts
 """
@@ -60,12 +62,17 @@ def apply_fsdp_moe(
     """
     Apply FSDP2 with optional expert freezing for MoE models.
 
-    IMPORTANT: When freeze_experts=True, expert/MLP layers are frozen BEFORE
-    applying FSDP. This is required because current vLLM/sglang don't support
-    LoRA adapters on expert layers yet.
+    freeze_experts=True freezes expert/MLP layers BEFORE applying FSDP
+    (attention-only training). For LoRA models this freezes the expert-side
+    LoRA params — the base weights are already frozen by PEFT. Use this when
+    the generator's vLLM is < 0.15 and cannot serve expert-layer adapters.
+
+    freeze_experts=False leaves expert LoRA params trainable. Serving the
+    resulting adapter requires vLLM >= 0.15 (fused_moe_lora kernel; Qwen3-MoE,
+    GPT-OSS, DeepSeek families).
 
     Args:
-        model: MoE model (e.g., Arcee Trinity Mini)
+        model: MoE model (e.g., Qwen3-30B-A3B)
         mesh: DeviceMesh for distributed training
         freeze_experts: If True, freeze all expert/MLP layers (default: True)
         param_dtype: Data type for parameters (bfloat16 for efficiency)
@@ -108,23 +115,21 @@ def apply_fsdp_moe(
         )
 
     # Step 3: Shard each transformer layer
-    # For MoE layers, we currently use standard FSDP (experts are frozen)
-    # TODO: Implement Expert Parallelism (EP) for unfrozen experts
+    # MoE and dense layers both use standard FSDP data parallelism; with
+    # freeze_experts=False the expert LoRA params simply stay trainable.
+    # TODO: Expert Parallelism (EP) as a future optimization for large expert counts
+    expert_lora_training = False
     for i, layer in enumerate(layers):
-        if is_moe_layer(layer):
-            # MoE layer detected
-            if freeze_experts:
-                # Experts are frozen, just apply standard FSDP
-                fully_shard(layer, mesh=mesh, mp_policy=mp_policy)
-            else:
-                # Future: Apply Expert Parallelism here
-                # For now, fall back to standard FSDP
-                print(f"⚠️ Warning: MoE layer {i} detected with freeze_experts=False. "
-                      f"Expert Parallelism not yet implemented. Using standard FSDP.")
-                fully_shard(layer, mesh=mesh, mp_policy=mp_policy)
-        else:
-            # Dense layer (attention, layer norm, etc.)
-            fully_shard(layer, mesh=mesh, mp_policy=mp_policy)
+        if is_moe_layer(layer) and not freeze_experts:
+            expert_lora_training = True
+        fully_shard(layer, mesh=mesh, mp_policy=mp_policy)
+
+    if expert_lora_training:
+        print(
+            "MoE: freeze_experts=False — expert LoRA params are trainable. "
+            "Serving these adapters requires vLLM >= 0.15 (fused_moe_lora) "
+            "on the DisGenerator prefill/decode servers."
+        )
 
     # Step 4: Shard embedding layer
     if embed_tokens is not None:

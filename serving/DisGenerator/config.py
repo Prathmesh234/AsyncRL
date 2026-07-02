@@ -1,8 +1,8 @@
 """
 Configuration for DisGenerator disaggregated serving.
 
-This module provides configuration for the P2P NCCL disaggregated
-prefill-decode architecture.
+This module provides configuration for the NIXL-based disaggregated
+prefill-decode architecture (NixlConnector).
 """
 
 import os
@@ -58,24 +58,23 @@ def get_latest_policy_path() -> Optional[str]:
 @dataclass
 class ServerConfig:
     """Configuration for a single vLLM server instance."""
-    
+
     gpu_id: int
     http_port: int
+    # NIXL side channel port — must be unique per instance on the same host
+    # (exported as VLLM_NIXL_SIDE_CHANNEL_PORT).
     kv_port: int
     role: Literal["prefill", "decode"]
-    
+
     @property
     def kv_role(self) -> str:
-        return "kv_producer" if self.role == "prefill" else "kv_consumer"
-    
-    @property
-    def kv_buffer_size(self) -> str:
-        # Prefill needs less buffer (produces), decode needs more (consumes)
-        return "1e9" if self.role == "prefill" else "8e9"
-    
+        # NixlConnector uses "kv_both" for every instance; the proxy's
+        # kv_transfer_params handshake decides producer/consumer per request.
+        return "kv_both"
+
     @property
     def gpu_memory_utilization(self) -> float:
-        # Decode needs headroom for incoming KV cache
+        # Decode hosts long-context KV + LoRA adapters — keep headroom
         return 0.9 if self.role == "prefill" else 0.7
 
 
@@ -112,16 +111,11 @@ class DisGeneratorConfig:
     
     # Proxy configuration
     proxy_ip: str = "0.0.0.0"
-    proxy_port: int = 30001
     proxy_http_port: int = 10001
-    
+
     # Timeouts
     server_timeout_seconds: int = 600
     request_timeout_hours: int = 6
-    
-    # NCCL configuration
-    nccl_num_channels: int = 16
-    send_type: str = "PUT_ASYNC"
     
     @property
     def prefill_servers(self) -> list[ServerConfig]:
@@ -150,19 +144,10 @@ class DisGeneratorConfig:
         ]
     
     def get_kv_transfer_config(self, server: ServerConfig) -> dict:
-        """Generate KV transfer config JSON for a server."""
+        """Generate KV transfer config JSON for a server (NixlConnector)."""
         return {
-            "kv_connector": "P2pNcclConnector",
+            "kv_connector": "NixlConnector",
             "kv_role": server.kv_role,
-            "kv_buffer_size": server.kv_buffer_size,
-            "kv_port": str(server.kv_port),
-            "kv_connector_extra_config": {
-                "proxy_ip": self.proxy_ip,
-                "proxy_port": str(self.proxy_port),
-                "http_port": str(server.http_port),
-                "send_type": self.send_type,
-                "nccl_num_channels": str(self.nccl_num_channels),
-            },
         }
 
 

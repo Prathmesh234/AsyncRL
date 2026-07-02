@@ -14,6 +14,11 @@ dependencies = [
     "tensorboard>=2.20.0",
     "tomli>=2.3.0",
     "trl>=0.22.2",
-    "vllm>=0.10.0",
+    # NIXL backs the NixlConnector KV transfer between prefill/decode servers
+    "nixl",
+    # >= 0.15 needed for expert-layer LoRA on MoE models (fused_moe_lora kernel).
+    # KV transfer uses NixlConnector, so post-0.24 releases (which removed
+    # P2pNcclConnector) are fine.
+    "vllm>=0.15.0",
     "wandb>=0.22.1",
 ]
